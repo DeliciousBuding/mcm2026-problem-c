@@ -96,7 +96,6 @@ Max HDI width (week-level) & \MetricMaxHDI \\
 Mean HDI width (week-level) & \MetricMeanHDI \\
 Median HDI width (week-level) & \MetricMedianHDI \\
 P90 HDI width (week-level) & \MetricHDIPctNinety \\
-Max HDI width (week-level) & \MetricMaxHDI \\
 Rank vs percent flip rate & \MetricFlipRate\% \\
 DAWS stability & \MetricDAWSStability \\
 DAWS fairness (Kendall $\tau$) & \MetricDAWSFairness \\
@@ -178,11 +177,13 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \end{enumerate}
 
 % 机制对比雷达图
+\vspace{-0.5em}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_mechanism_radar.pdf}
+\includegraphics[width=0.70\linewidth]{figures/fig_mechanism_radar.pdf}
 \caption{DAWS achieves a better trade-off among fairness, agency, and stability.}
 \end{figure}
+\vspace{-0.5em}
 
 \clearpage
 \tableofcontents
@@ -369,14 +370,18 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 % 规则切换后验
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_rule_switch.pdf}
-\caption{The inferred switch concentrates around Season 28 with residual uncertainty.}
-\end{figure}
-
-\begin{figure}[H]
+\begin{subfigure}[t]{0.48\linewidth}
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_rule_switch_ci.pdf}
-\caption{Bootstrap uncertainty bands for the rule-switch probability.}
+\includegraphics[width=\linewidth]{figures/fig_rule_switch.pdf}
+\caption{Point estimate.}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.48\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/fig_rule_switch_ci.pdf}
+\caption{Bootstrap band.}
+\end{subfigure}
+\caption{Rule-switch probability with uncertainty.}
 \end{figure}
 
 \keyoutput{Polytope bounds, slack $S_t^*$, posterior samples, and rule-switch probabilities.}
@@ -423,21 +428,20 @@ We compute fairness, agency, stability, and deficit for percent, rank, rank+save
 % 机制差异的结果迁移图（占位保留）
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_alluvial_finalists.pdf}
+\includegraphics[width=0.98\linewidth]{figures/fig_alluvial_finalists.pdf}
 \caption{Mechanism choice can alter finalists and champions with nontrivial probability.}
-\end{figure}
-
-% 三元权衡图
-\begin{figure}[H]
+\vspace{0.4em}
+\begin{subfigure}[t]{0.49\linewidth}
 \centering
-\includegraphics[width=0.85\linewidth]{figures/fig_ternary_daws.pdf}
-\caption{DAWS sits on the Pareto frontier of the trade-off surface.}
-\end{figure}
-
-\begin{figure}[H]
+\includegraphics[width=\linewidth]{figures/fig_ternary_daws.pdf}
+\caption{DAWS on the Pareto surface.}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.49\linewidth}
 \centering
-\includegraphics[width=0.86\linewidth]{figures/fig_mechanism_compare.pdf}
-\caption{Numeric comparison of fairness, agency, and stability across mechanisms.}
+\includegraphics[width=\linewidth]{figures/fig_mechanism_compare.pdf}
+\caption{Numeric comparison across mechanisms.}
+\end{subfigure}
 \end{figure}
 
 \keyoutput{Mechanism metrics, flip probabilities, and Pareto comparisons.}
@@ -523,7 +527,7 @@ We vary $\sigma$ (smoothness), $\epsilon$ (vote floor), and $\rho$ (switch proba
 We benchmark sampling scale with a multi-process setup and record runtime, error (mean HDI width), stability (DAWS), and theory-fit (Kendall $\tau$). The curves show diminishing returns in uncertainty reduction beyond mid-scale settings; the elbow (dashed line) marks our final scale choice.
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_scale_benchmark.pdf}
+\includegraphics[width=0.98\linewidth]{figures/fig_scale_benchmark.pdf}
 \caption{Scale benchmark across $N_{\text{proposals}}$ with runtime, error, stability, and theory-fit.}
 \end{figure}
 
@@ -532,10 +536,16 @@ We benchmark sampling scale with a multi-process setup and record runtime, error
 \section{Conclusions and Recommendations}
 \takeaway{Audit-first modeling reveals uncertainty that matters; DAWS offers a robust compromise.}
 We provide a complete audit of feasible fan votes, show that rank rules create measurable democratic deficit, and propose DAWS to balance fairness, agency, and stability. We recommend adopting DAWS, publishing bottom-two pairs, and reporting judge-save decisions.
+\begin{itemize}[leftmargin=2em]
+\item \textbf{Decision-ready summary:} Uncertainty is concentrated in a small set of weeks; most weeks are identifiable.
+\item \textbf{Mechanism impact:} Rank aggregation increases flips; DAWS improves stability without sacrificing fairness.
+\item \textbf{Actionability:} Publish a DAWS schedule and judge-save criteria to improve transparency.
+\end{itemize}
 
 \clearpage
 \section*{References}
 \addcontentsline{toc}{section}{References}
+\renewcommand{\refname}{}
 \begin{thebibliography}{9}
 \bibitem{comap2026} COMAP. 2026 MCM/ICM Problem C: Dancing with the Stars (DWTS). Contest Problem Statement.
 \bibitem{hitandrun} Smith, R. (1984). Efficient Monte Carlo procedures for generating points uniformly in polytopes. \textit{Operations Research}.
@@ -548,5 +558,10 @@ We provide a complete audit of feasible fan votes, show that rank rules create m
 \section*{AI Use Report}
 \addcontentsline{toc}{section}{AI Use Report}
 We used AI assistance to draft the report structure, provide LaTeX boilerplate, and paraphrase method descriptions. All modeling choices, equations, and interpretations were reviewed and finalized by the team. No external data beyond the provided contest dataset were used.
+\begin{itemize}[leftmargin=2em]
+\item Reproducibility: code, figures, and metrics are generated from the provided dataset.
+\item Environment: Miniforge + mcm2026 with pinned scientific stack.
+\item Audit trail: pipeline logs and summary metrics are saved for each run.
+\end{itemize}
 
 \end{document}

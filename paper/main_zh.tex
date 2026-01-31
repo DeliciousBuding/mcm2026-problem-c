@@ -177,11 +177,13 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \item 用审计仪表盘提前预警高不确定周。
 \end{enumerate}
 
+\vspace{-0.5em}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_mechanism_radar.pdf}
+\includegraphics[width=0.70\linewidth]{figures/fig_mechanism_radar.pdf}
 \caption{DAWS 在公平、主权、稳定之间实现更优折中。}
 \end{figure}
+\vspace{-0.5em}
 
 \clearpage
 \tableofcontents
@@ -361,14 +363,18 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \end{equation}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_rule_switch.pdf}
-\caption{规则切换概率在 S28 附近上升。}
-\end{figure}
-
-\begin{figure}[H]
+\begin{subfigure}[t]{0.48\linewidth}
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_rule_switch_ci.pdf}
-\caption{规则切换概率的置信带（bootstrap）。}
+\includegraphics[width=\linewidth]{figures/fig_rule_switch.pdf}
+\caption{点估计。}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.48\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/fig_rule_switch_ci.pdf}
+\caption{置信带。}
+\end{subfigure}
+\caption{规则切换概率与不确定性区间。}
 \end{figure}
 
 \keyoutput{多面体边界、Slack、后验样本、规则切换概率。}
@@ -410,20 +416,20 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_alluvial_finalists.pdf}
-\caption{机制选择会改变决赛阵容与冠军的概率分配。}
-\end{figure}
-
-\begin{figure}[H]
+\includegraphics[width=0.98\linewidth]{figures/fig_alluvial_finalists.pdf}
+\caption{????????????????????}
+\vspace{0.4em}
+\begin{subfigure}[t]{0.49\linewidth}
 \centering
-\includegraphics[width=0.85\linewidth]{figures/fig_ternary_daws.pdf}
-\caption{DAWS 位于权衡前沿。}
-\end{figure}
-
-\begin{figure}[H]
+\includegraphics[width=\linewidth]{figures/fig_ternary_daws.pdf}
+\caption{DAWS ???????}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.49\linewidth}
 \centering
-\includegraphics[width=0.86\linewidth]{figures/fig_mechanism_compare.pdf}
-\caption{三种机制在公平性、主权、稳定性上的数值对比。}
+\includegraphics[width=\linewidth]{figures/fig_mechanism_compare.pdf}
+\caption{?????????}
+\end{subfigure}
 \end{figure}
 
 \keyoutput{机制指标、翻转率与 Pareto 权衡。}
@@ -495,7 +501,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 我们在多进程设置下比较不同采样规模，记录运行时间、误差（均值 HDI 宽度）、稳定性（DAWS）与理论匹配度（Kendall $\tau$）。结果显示误差随规模提升而趋于平缓，图中虚线标注了拐点与最终规模选择。
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_scale_benchmark.pdf}
+\includegraphics[width=0.98\linewidth]{figures/fig_scale_benchmark.pdf}
 \caption{不同采样规模下的时间、误差、稳定性与匹配度对比。}
 \end{figure}
 
@@ -504,10 +510,16 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \section{结论与建议}
 \takeaway{审计先行揭示关键不确定性，DAWS 提供稳健折中。}
 我们完成全赛季粉丝票审计，量化 Rank 机制的民主赤字，并提出 DAWS 方案以提升公平、主权与稳定。
+\begin{itemize}[leftmargin=2em]
+\item \textbf{可读结论：} 不确定性集中在少数周，其余周可识别性较高。
+\item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 在稳定性上明显更优。
+\item \textbf{落地建议：} 公布 DAWS 权重计划与 judge-save 规则以提升透明度。
+\end{itemize}
 
 \clearpage
 \section*{参考文献}
 \addcontentsline{toc}{section}{参考文献}
+\renewcommand{\refname}{}
 \begin{thebibliography}{9}
 \bibitem{comap2026} COMAP. 2026 MCM/ICM Problem C: Dancing with the Stars (DWTS). Contest Problem Statement.
 \bibitem{hitandrun} Smith, R. (1984). Efficient Monte Carlo procedures for generating points uniformly in polytopes. \textit{Operations Research}.
@@ -520,5 +532,10 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \section*{AI 使用报告}
 \addcontentsline{toc}{section}{AI 使用报告}
 我们使用 AI 协助完成论文结构草稿、LaTeX 模板与方法表述润色；所有模型选择与解释均由团队复核并最终确认。
+\begin{itemize}[leftmargin=2em]
+\item 可复现性：代码、图表与指标均由提供数据自动生成。
+\item 环境：Miniforge + mcm2026，科学计算栈已固定版本。
+\item 过程留痕：运行日志与汇总指标可追溯每次实验。
+\end{itemize}
 
 \end{document}
