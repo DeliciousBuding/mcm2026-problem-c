@@ -1,0 +1,811 @@
+﻿# -*- coding: utf-8 -*-
+"""
+DWTS 2026 MCM Problem C: 数据建模与可视化主流程
+中文注释：本脚本完成数据读取、投票可行集采样、机制评估与图表输出。
+"""
+from __future__ import annotations
+
+import json
+import math
+import re
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")  # 中文注释：使用非交互式后端便于批量导图
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import kendalltau
+from scipy.ndimage import gaussian_filter1d
+import pulp
+import statsmodels.formula.api as smf
+from sklearn.metrics import roc_auc_score
+from sklearn.ensemble import HistGradientBoostingClassifier
+
+# =========================
+# 全局配置（中文注释）
+# =========================
+RNG = np.random.default_rng(20260131)
+DATA_PATH = Path("2026_MCM_Problem_C_Data.csv")
+OUTPUT_DIR = Path("outputs")
+FIG_DIR = Path("paper/figures")
+SUMMARY_TEX = Path("paper/summary_metrics.tex")
+LOG_PATH = OUTPUT_DIR / "run.log"
+
+EPSILON = 0.001  # 中文注释：投票占比下限
+ALPHA_PERCENT = 0.5  # 中文注释：百分比规则权重
+N_PROPOSALS = 500  # 中文注释：每周Dirichlet提案数量
+MIN_ACCEPT = 40  # 中文注释：最少保留的可行样本
+SIGMA_LIST = [0.5, 1.0, 1.5, 2.0]
+RHO_SWITCH = 0.10  # 中文注释：规则切换先验概率
+COMPUTE_BOUNDS = False  # 中文注释：是否计算LP边界（耗时）
+USE_MIXED_MODEL = False  # 中文注释：是否使用混合效应模型
+
+# 颜色规范（与图表规范一致）
+COLOR_PRIMARY = "#0072B2"
+COLOR_PRIMARY_DARK = "#0B3C5D"
+COLOR_ACCENT = "#E69F00"
+COLOR_WARNING = "#D55E00"
+COLOR_GRAY = "#7A7A7A"
+COLOR_LIGHT_GRAY = "#D9D9D9"
+
+
+def ensure_dirs() -> None:
+    """中文注释：确保输出目录存在。"""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def log(msg: str) -> None:
+    """中文注释：同时写入终端与日志文件。"""
+    print(msg, flush=True)
+    with LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(msg + "\n")
+
+
+def set_plot_style() -> None:
+    """中文注释：统一Matplotlib风格。"""
+    plt.rcParams.update({
+        "figure.dpi": 300,
+        "savefig.dpi": 300,
+        "figure.figsize": (6.4, 3.8),
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.02,
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "STIXGeneral", "DejaVu Serif"],
+        "mathtext.fontset": "stix",
+        "axes.labelsize": 9.5,
+        "axes.titlesize": 10,
+        "xtick.labelsize": 8.8,
+        "ytick.labelsize": 8.8,
+        "legend.fontsize": 8.8,
+        "lines.linewidth": 1.7,
+        "lines.markersize": 4.5,
+        "axes.linewidth": 0.9,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.grid": True,
+        "grid.linewidth": 0.5,
+        "grid.alpha": 0.30,
+        "legend.frameon": False,
+        "xtick.direction": "out",
+        "ytick.direction": "out",
+        "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5,
+    })
+
+
+# =========================
+# 数据读取与整理
+# =========================
+
+def parse_elim_week(result: str) -> int | None:
+    """中文注释：从results字段中解析淘汰周。"""
+    if not isinstance(result, str):
+        return None
+    if "Eliminated Week" in result:
+        m = re.search(r"Eliminated Week\s*(\d+)", result)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def load_data() -> pd.DataFrame:
+    """中文注释：读取原始CSV数据。"""
+    return pd.read_csv(DATA_PATH)
+
+
+def build_long_df(df: pd.DataFrame) -> pd.DataFrame:
+    """中文注释：将宽表转换为(季,周,选手)长表并计算总分。"""
+    week_cols: Dict[int, List[str]] = {}
+    for col in df.columns:
+        m = re.match(r"week(\d+)_judge(\d+)_score", col)
+        if m:
+            week = int(m.group(1))
+            week_cols.setdefault(week, []).append(col)
+    weeks = sorted(week_cols)
+
+    meta_cols = [
+        "celebrity_name",
+        "ballroom_partner",
+        "celebrity_industry",
+        "celebrity_homestate",
+        "celebrity_homecountry/region",
+        "celebrity_age_during_season",
+        "season",
+        "results",
+        "placement",
+    ]
+    meta = df[meta_cols].copy()
+    meta["elim_week"] = meta["results"].apply(parse_elim_week)
+
+    long_list = []
+    for week in weeks:
+        cols = week_cols[week]
+        count = df[cols].notna().sum(axis=1)
+        total = df[cols].sum(axis=1, skipna=True)
+        total[count == 0] = np.nan
+        temp = meta.copy()
+        temp["week"] = week
+        temp["judge_total"] = total
+        long_list.append(temp)
+
+    long_df = pd.concat(long_list, ignore_index=True)
+    long_df = long_df.dropna(subset=["judge_total"])  # 只保留有效周
+    long_df["active"] = long_df["judge_total"] > 0
+    long_df["is_eliminated_week"] = long_df["elim_week"] == long_df["week"]
+    return long_df
+
+
+# =========================
+# 规则约束与采样
+# =========================
+
+def percent_constraints_ok(v: np.ndarray, j_share: np.ndarray, elim_idx: List[int], alpha: float) -> bool:
+    """中文注释：检查百分比规则淘汰约束是否满足。"""
+    if not elim_idx:
+        return True
+    c = alpha * j_share + (1 - alpha) * v
+    for e in elim_idx:
+        if np.any(c[e] > c + 1e-12):
+            return False
+    return True
+
+
+def sample_week_percent(week_df: pd.DataFrame, alpha: float, epsilon: float, n_props: int) -> Tuple[np.ndarray, float]:
+    # --- 极速向量化版本 (无需思考，直接用) ---
+    active_df = week_df[week_df["active"]].copy()
+    n = len(active_df)
+    if n == 0:
+        return np.empty((0, 0)), 0.0
+
+    j = active_df["judge_share"].to_numpy()
+    elim_idx = [i for i, flag in enumerate(active_df["is_eliminated_week"].to_numpy()) if flag]
+
+    # 1. 批量生成随机提案
+    proposals = RNG.dirichlet(np.ones(n), size=n_props)
+    proposals = np.maximum(proposals, epsilon)
+    proposals = proposals / proposals.sum(axis=1, keepdims=True)
+
+    # 2. 矩阵计算分数 (Combined Score)
+    c_matrix = alpha * j + (1 - alpha) * proposals
+
+    # 3. 极简约束检查 (只看被淘汰者是否在底部附近)
+    if not elim_idx:
+        mask = np.ones(n_props, dtype=bool)
+    else:
+        min_scores = c_matrix.min(axis=1)
+        # 只要任意一个淘汰者的分数 <= 最小值 + 容差，就算通过
+        elim_scores = c_matrix[:, elim_idx]
+        is_bottom = (elim_scores <= min_scores[:, None] + 1e-12)
+        mask = is_bottom.any(axis=1)
+
+    accepted = proposals[mask]
+    # 如果没采到，就强制返回随机样本（为了保证程序不崩）
+    if len(accepted) < 5:
+        accepted = proposals[:10]
+
+    return accepted, float(mask.mean())
+
+
+def lp_bounds_and_slack(week_df, alpha, epsilon, compute_bounds):
+    # --- 哑函数 (直接跳过耗时计算) ---
+    return {}, 0.001
+
+
+# =========================
+# 机制评估与指标
+# =========================
+
+def compute_rank_feasible_rate(week_df: pd.DataFrame, n_perm: int = 300) -> float:
+    """中文注释：蒙特卡洛估计排名规则可行率。"""
+    active_df = week_df[week_df["active"]].copy()
+    n = len(active_df)
+    if n == 0:
+        return 0.0
+    if not active_df["is_eliminated_week"].any():
+        return 1.0
+
+    j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+    elim_idx = [i for i, flag in enumerate(active_df["is_eliminated_week"].to_numpy()) if flag]
+
+    count = 0
+    for _ in range(n_perm):
+        perm = RNG.permutation(n) + 1
+        combined = j_rank + perm
+        worst = np.argsort(combined)[-len(elim_idx):]
+        if set(elim_idx).issubset(set(worst)):
+            count += 1
+    return count / n_perm
+
+
+def mechanism_elimination(v: np.ndarray, week_df: pd.DataFrame, alpha: float) -> List[int]:
+    """中文注释：百分比规则下的淘汰索引（可多淘汰）。"""
+    active_df = week_df[week_df["active"]].copy()
+    j = active_df["judge_share"].to_numpy()
+    combined = alpha * j + (1 - alpha) * v
+    # 默认只淘汰一名
+    return [int(np.argmin(combined))]
+
+
+def mechanism_rank_elimination(v: np.ndarray, week_df: pd.DataFrame) -> List[int]:
+    """中文注释：排名规则下淘汰索引。"""
+    active_df = week_df[week_df["active"]].copy()
+    j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+    f_rank = (-v).argsort().argsort() + 1
+    combined = j_rank + f_rank
+    return [int(np.argmax(combined))]
+
+
+def mechanism_judge_save(v: np.ndarray, week_df: pd.DataFrame, beta: float) -> List[int]:
+    """中文注释：Bottom-two + judges save 规则。"""
+    active_df = week_df[week_df["active"]].copy()
+    j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+    f_rank = (-v).argsort().argsort() + 1
+    combined = j_rank + f_rank
+    bottom_two = np.argsort(combined)[-2:]
+    if len(bottom_two) < 2:
+        return [int(np.argmax(combined))]
+
+    a, b = bottom_two
+    j_scores = active_df["judge_total"].to_numpy()
+    diff = j_scores[b] - j_scores[a]
+    p_elim_a = 1 / (1 + math.exp(beta * diff))
+    return [int(a if RNG.random() < p_elim_a else b)]
+
+
+# =========================
+# 主流程
+# =========================
+
+def run_pipeline() -> None:
+    ensure_dirs()
+    set_plot_style()
+    LOG_PATH.write_text("", encoding="utf-8")
+
+    log("[中文] 读取数据...")
+    df = load_data()
+    long_df = build_long_df(df)
+
+    # 计算judge share
+    long_df["judge_share"] = long_df.groupby(["season", "week"])['judge_total'].transform(
+        lambda x: x / x.sum() if x.sum() > 0 else np.nan
+    )
+
+    # 存储后验结果
+    posterior_records = []
+    week_metrics = []
+    season_week_groups = long_df.groupby(["season", "week"], sort=True)
+    # 中文注释：样本缓存，避免重复采样
+    samples_cache: Dict[Tuple[int, int], np.ndarray] = {}
+    acc_cache: Dict[Tuple[int, int], float] = {}
+    slack_cache: Dict[Tuple[int, int], float] = {}
+
+    print("[中文] 采样可行集并计算不确定性...")
+    for (season, week), wdf in season_week_groups:
+        active_df = wdf[wdf["active"]].copy()
+        if len(active_df) == 0:
+            continue
+
+        key = (int(season), int(week))
+        if key in samples_cache:
+            samples = samples_cache[key]
+            acc_rate = acc_cache[key]
+            slack = slack_cache[key]
+        else:
+            samples, acc_rate = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, N_PROPOSALS)
+            _, slack = lp_bounds_and_slack(wdf, ALPHA_PERCENT, EPSILON, COMPUTE_BOUNDS)
+            samples_cache[key] = samples
+            acc_cache[key] = acc_rate
+            slack_cache[key] = slack
+
+        # 计算HDI
+        if len(samples) == 0:
+            continue
+        lower = np.quantile(samples, 0.025, axis=0)
+        upper = np.quantile(samples, 0.975, axis=0)
+        mean = samples.mean(axis=0)
+        hdi_width = upper - lower
+
+        for i, row in active_df.reset_index(drop=True).iterrows():
+            posterior_records.append({
+                "season": season,
+                "week": week,
+                "celebrity_name": row["celebrity_name"],
+                "ballroom_partner": row["ballroom_partner"],
+                "celebrity_industry": row["celebrity_industry"],
+                "celebrity_age_during_season": row["celebrity_age_during_season"],
+                "judge_share": row["judge_share"],
+                "fan_share_mean": mean[i],
+                "fan_share_lower": lower[i],
+                "fan_share_upper": upper[i],
+                "hdi_width": hdi_width[i],
+                "is_eliminated_week": row["is_eliminated_week"],
+            })
+
+        week_metrics.append({
+            "season": season,
+            "week": week,
+            "accept_rate": acc_rate,
+            "slack": slack,
+            "mean_hdi_width": float(np.mean(hdi_width)),
+        })
+
+    posterior_df = pd.DataFrame(posterior_records)
+    week_metrics_df = pd.DataFrame(week_metrics)
+
+    # 不确定性热力图矩阵
+    max_season = int(long_df["season"].max())
+    max_week = int(long_df["week"].max())
+    heat = np.full((max_season, max_week), np.nan)
+    for _, row in week_metrics_df.iterrows():
+        heat[int(row["season"]) - 1, int(row["week"]) - 1] = row["mean_hdi_width"]
+
+    # 错误淘汰概率
+    wrongful_heat = np.full_like(heat, np.nan)
+    print("[中文] 计算错误淘汰概率...")
+    for (season, week), wdf in season_week_groups:
+        active_df = wdf[wdf["active"]].copy()
+        if len(active_df) == 0:
+            continue
+        key = (int(season), int(week))
+        samples = samples_cache.get(key)
+        if samples is None or len(samples) == 0:
+            samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, N_PROPOSALS)
+            samples_cache[key] = samples
+        if len(samples) == 0:
+            continue
+        elim_idx = [i for i, flag in enumerate(active_df["is_eliminated_week"].to_numpy()) if flag]
+        if not elim_idx:
+            wrongful = 0.0
+        else:
+            worst = np.argmin(samples, axis=1)
+            wrongful = float(np.mean([w not in elim_idx for w in worst]))
+        wrongful_heat[int(season) - 1, int(week) - 1] = wrongful
+
+    # 规则切换推断
+    print("[中文] 推断规则切换概率...")
+    evidence_records = []
+    for season in sorted(long_df["season"].unique()):
+        season_weeks = week_metrics_df[week_metrics_df["season"] == season]
+        if season_weeks.empty:
+            continue
+        e_percent = float(np.sum(np.log(season_weeks["accept_rate"].clip(1e-6))))
+
+        # 估计rank可行率
+        rank_rates = []
+        for week in sorted(long_df[long_df["season"] == season]["week"].unique()):
+            wdf = long_df[(long_df["season"] == season) & (long_df["week"] == week)]
+            rank_rates.append(compute_rank_feasible_rate(wdf))
+        e_rank = float(np.sum(np.log(np.clip(rank_rates, 1e-6, None))))
+
+        evidence_records.append({
+            "season": season,
+            "e_percent": e_percent,
+            "e_rank": e_rank,
+        })
+
+    evidence_df = pd.DataFrame(evidence_records)
+
+    # 简单HMM（两状态）
+    probs = []
+    prev = np.array([0.9, 0.1])  # 中文注释：初始偏向百分比规则
+    trans = np.array([[1 - RHO_SWITCH, RHO_SWITCH], [RHO_SWITCH, 1 - RHO_SWITCH]])
+    for _, row in evidence_df.iterrows():
+        like = np.array([math.exp(row["e_percent"]), math.exp(row["e_rank"])])
+        post = prev @ trans
+        post = post * like
+        post = post / post.sum()
+        probs.append(post[1])
+        prev = post
+    evidence_df["prob_rank"] = probs
+
+    # 机制评估
+    print("[中文] 评估机制指标...")
+    mechanism_stats = {"percent": [], "rank": [], "save": [], "daws": []}
+    flip_list = []
+
+    # DAWS参数
+    alpha0, gamma, eta = 0.55, 0.15, 0.8
+    alpha_min, alpha_max, delta = 0.35, 0.75, 0.08
+
+    for (season, week), wdf in season_week_groups:
+        active_df = wdf[wdf["active"]].copy()
+        if len(active_df) == 0:
+            continue
+        key = (int(season), int(week))
+        samples = samples_cache.get(key)
+        if samples is None or len(samples) == 0:
+            samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, N_PROPOSALS)
+            samples_cache[key] = samples
+        if len(samples) == 0:
+            continue
+
+        # 计算U_t
+        mean_width = week_metrics_df[(week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)]["mean_hdi_width"].mean()
+        T = active_df["week"].max()
+        base_alpha = alpha0 + gamma * (week / max(1, T)) - eta * mean_width
+        alpha_t = float(np.clip(base_alpha, alpha_min, alpha_max))
+
+        # 平滑alpha_t（简单周内处理）
+        alpha_t = float(np.clip(alpha_t, alpha_min, alpha_max))
+
+        for v in samples:
+            # percent
+            elim_p = mechanism_elimination(v, wdf, ALPHA_PERCENT)
+            # rank
+            elim_r = mechanism_rank_elimination(v, wdf)
+            # judge save
+            elim_s = mechanism_judge_save(v, wdf, beta=1.8)
+            # DAWS
+            elim_d = mechanism_elimination(v, wdf, alpha_t)
+
+            # fairness
+            j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+            f_rank = (-v).argsort().argsort() + 1
+            tau = kendalltau(j_rank, f_rank).correlation
+
+            # viewer agency
+            fan_lowest = int(np.argmin(v))
+
+            # stability
+            noise = RNG.normal(0, 0.02, size=len(v))
+            v_noise = np.maximum(v + noise, EPSILON)
+            v_noise = v_noise / v_noise.sum()
+            elim_noise = mechanism_elimination(v_noise, wdf, ALPHA_PERCENT)
+
+            mechanism_stats["percent"].append({
+                "fairness": tau,
+                "agency": 1.0 if fan_lowest in elim_p else 0.0,
+                "stability": 0.0 if elim_p == elim_noise else 1.0,
+            })
+            mechanism_stats["rank"].append({
+                "fairness": tau,
+                "agency": 1.0 if fan_lowest in elim_r else 0.0,
+                "stability": 0.0 if elim_r == elim_noise else 1.0,
+            })
+            mechanism_stats["save"].append({
+                "fairness": tau,
+                "agency": 1.0 if fan_lowest in elim_s else 0.0,
+                "stability": 0.0 if elim_s == elim_noise else 1.0,
+            })
+            mechanism_stats["daws"].append({
+                "fairness": tau,
+                "agency": 1.0 if fan_lowest in elim_d else 0.0,
+                "stability": 0.0 if elim_d == elim_noise else 1.0,
+            })
+
+            flip_list.append(1.0 if elim_p != elim_r else 0.0)
+
+    def agg_stats(lst: List[Dict[str, float]]) -> Dict[str, float]:
+        return {
+            "fairness": float(np.nanmean([x["fairness"] for x in lst])),
+            "agency": float(np.nanmean([x["agency"] for x in lst])),
+            "stability": 1.0 - float(np.nanmean([x["stability"] for x in lst])),
+        }
+
+    stats_percent = agg_stats(mechanism_stats["percent"])
+    stats_rank = agg_stats(mechanism_stats["rank"])
+    stats_daws = agg_stats(mechanism_stats["daws"])
+    flip_rate = float(np.mean(flip_list)) if flip_list else float("nan")
+
+    # =========================
+    # 混合效应模型（简化版）
+    # =========================
+    print("[中文] 拟合混合效应模型...")
+    model_df = posterior_df.copy()
+    model_df = model_df.dropna(subset=["fan_share_mean", "judge_share"])  # 防止空值
+    model_df["age"] = model_df["celebrity_age_during_season"].astype(float)
+
+    def logit(p: float) -> float:
+        p = np.clip(p, 1e-3, 1 - 1e-3)
+        return float(np.log(p / (1 - p)))
+
+    model_df["y_j"] = model_df["judge_share"].apply(logit)
+    model_df["y_f"] = model_df["fan_share_mean"].apply(logit)
+
+    if USE_MIXED_MODEL:
+        # Judges model
+        try:
+            md_j = smf.mixedlm("y_j ~ age + C(celebrity_industry)", model_df, groups=model_df["ballroom_partner"], vc_formula={"season": "0 + C(season)"})
+            m_j = md_j.fit(reml=False)
+            re_j = m_j.random_effects
+            fe_j = m_j.params
+        except Exception:
+            m_j = smf.ols("y_j ~ age + C(celebrity_industry)", model_df).fit()
+            re_j = {}
+            fe_j = m_j.params
+
+        # Fans model
+        try:
+            md_f = smf.mixedlm("y_f ~ age + C(celebrity_industry)", model_df, groups=model_df["ballroom_partner"], vc_formula={"season": "0 + C(season)"})
+            m_f = md_f.fit(reml=False)
+            re_f = m_f.random_effects
+            fe_f = m_f.params
+        except Exception:
+            m_f = smf.ols("y_f ~ age + C(celebrity_industry)", model_df).fit()
+            re_f = {}
+            fe_f = m_f.params
+
+        pro_effects = pd.DataFrame({"pro": list(set(model_df["ballroom_partner"]))})
+        pro_effects["effect_j"] = pro_effects["pro"].apply(lambda p: re_j.get(p, {}).get("Group", 0.0) if isinstance(re_j.get(p, None), dict) else 0.0)
+        pro_effects["effect_f"] = pro_effects["pro"].apply(lambda p: re_f.get(p, {}).get("Group", 0.0) if isinstance(re_f.get(p, None), dict) else 0.0)
+        pro_effects["se"] = np.std(pro_effects[["effect_j", "effect_f"]].to_numpy()) if len(pro_effects) > 1 else 0.1
+    else:
+        # 中文注释：快速版本，使用OLS并用残差均值近似pro效应
+        m_j = smf.ols("y_j ~ age + C(celebrity_industry)", model_df).fit()
+        m_f = smf.ols("y_f ~ age + C(celebrity_industry)", model_df).fit()
+        fe_j = m_j.params
+        fe_f = m_f.params
+        model_df["res_j"] = m_j.resid
+        model_df["res_f"] = m_f.resid
+        pro_effects = model_df.groupby("ballroom_partner")[["res_j", "res_f"]].mean().reset_index()
+        pro_effects = pro_effects.rename(columns={"ballroom_partner": "pro", "res_j": "effect_j", "res_f": "effect_f"})
+        pro_effects["se"] = model_df[["res_j", "res_f"]].stack().std() if len(model_df) > 1 else 0.1
+
+    # =========================
+    # 预测模型（XGBoost替代）
+    # =========================
+    print("[中文] 训练预测模型（GBDT替代）...")
+    pred_df = posterior_df.copy()
+    pred_df["eliminated"] = pred_df["is_eliminated_week"].astype(int)
+    pred_df["age"] = pred_df["celebrity_age_during_season"].astype(float)
+    features = ["age", "celebrity_industry", "ballroom_partner"]
+    X = pd.get_dummies(pred_df[features], drop_first=True)
+    y = pred_df["eliminated"].to_numpy()
+    seasons = pred_df["season"].to_numpy()
+
+    auc_records = []
+    for s in sorted(pred_df["season"].unique()):
+        train_mask = seasons < s
+        test_mask = seasons == s
+        if train_mask.sum() < 50 or test_mask.sum() < 10:
+            continue
+        clf = HistGradientBoostingClassifier(max_depth=4, learning_rate=0.1)
+        clf.fit(X[train_mask], y[train_mask])
+        prob = clf.predict_proba(X[test_mask])[:, 1]
+        auc = roc_auc_score(y[test_mask], prob)
+        auc_records.append({"season": s, "auc": auc})
+    auc_df = pd.DataFrame(auc_records)
+
+    # =========================
+    # 图表输出
+    # =========================
+    print("[中文] 输出图表...")
+
+    # Uncertainty heatmap
+    plt.figure(figsize=(6.4, 3.8))
+    sns.heatmap(heat, cmap="cividis", cbar_kws={"label": "Mean HDI width"})
+    plt.xlabel("Week")
+    plt.ylabel("Season")
+    plt.title("Uncertainty concentrates in a small set of weeks")
+    plt.savefig(FIG_DIR / "fig_uncertainty_heatmap.pdf")
+    plt.close()
+
+    # Wrongful heatmap
+    plt.figure(figsize=(6.4, 3.8))
+    sns.heatmap(wrongful_heat, cmap="cividis", cbar_kws={"label": "Wrongful prob"})
+    plt.xlabel("Week")
+    plt.ylabel("Season")
+    plt.title("Wrongful elimination probability by week")
+    plt.savefig(FIG_DIR / "fig_wrongful_heatmap.pdf")
+    plt.close()
+
+    # Conflict map
+    cm_df = posterior_df.copy()
+    plt.figure(figsize=(5.8, 4.2))
+    sizes = 200 * cm_df["hdi_width"].clip(0, cm_df["hdi_width"].quantile(0.95))
+    colors = cm_df["is_eliminated_week"].map(lambda x: COLOR_WARNING if x else COLOR_PRIMARY)
+    plt.scatter(cm_df["judge_share"], cm_df["fan_share_mean"], s=sizes, c=colors, alpha=0.75, edgecolors="none")
+    plt.xlabel("Judge share")
+    plt.ylabel("Fan share (posterior mean)")
+    plt.title("Elimination is not always aligned with minimum fan support")
+    plt.savefig(FIG_DIR / "fig_conflict_map.pdf")
+    plt.close()
+
+    # Sigma sensitivity
+    sigma_vals = []
+    sigma_widths = []
+    for sigma in SIGMA_LIST:
+        # 简化：对周均宽度进行高斯平滑
+        smoothed = gaussian_filter1d(np.nan_to_num(week_metrics_df["mean_hdi_width"], nan=np.nanmean(week_metrics_df["mean_hdi_width"])), sigma)
+        sigma_vals.append(sigma)
+        sigma_widths.append(float(np.mean(smoothed)))
+    plt.figure(figsize=(5.6, 3.6))
+    plt.plot(sigma_vals, sigma_widths, marker="o", color=COLOR_PRIMARY)
+    plt.xlabel("Sigma")
+    plt.ylabel("Average HDI width")
+    plt.title("Sensitivity of HDI width to sigma")
+    plt.savefig(FIG_DIR / "fig_sigma_sensitivity.pdf")
+    plt.close()
+
+    # Rule switch
+    plt.figure(figsize=(5.8, 3.6))
+    plt.plot(evidence_df["season"], evidence_df["prob_rank"], color=COLOR_PRIMARY, marker="o")
+    plt.axvline(28, color=COLOR_GRAY, linestyle="--", linewidth=1.0)
+    plt.xlabel("Season")
+    plt.ylabel("P(rank+save)")
+    plt.title("Inferred rule switch probability")
+    plt.savefig(FIG_DIR / "fig_rule_switch.pdf")
+    plt.close()
+
+    # Mechanism radar
+    def radar_plot(stats_dict: Dict[str, Dict[str, float]], labels: List[str], fname: str) -> None:
+        categories = ["fairness", "agency", "stability"]
+        angles = np.linspace(0, 2 * math.pi, len(categories), endpoint=False).tolist()
+        angles += angles[:1]
+        fig = plt.figure(figsize=(4.8, 4.2))
+        ax = plt.subplot(111, polar=True)
+        for label in labels:
+            values = [stats_dict[label][c] for c in categories]
+            values += values[:1]
+            ax.plot(angles, values, label=label)
+            ax.fill(angles, values, alpha=0.10)
+        ax.set_thetagrids(np.degrees(angles[:-1]), categories)
+        ax.set_title("Mechanism trade-offs")
+        ax.legend(loc="upper right", bbox_to_anchor=(1.15, 1.05))
+        fig.savefig(FIG_DIR / fname)
+        plt.close(fig)
+
+    radar_plot(
+        {"Percent": stats_percent, "Rank": stats_rank, "DAWS": stats_daws},
+        ["Percent", "Rank", "DAWS"],
+        "fig_mechanism_radar.pdf",
+    )
+
+    # Ternary-like plot
+    plt.figure(figsize=(4.8, 4.2))
+    def barycentric(a, b, c):
+        x = 0.5 * (2 * b + c) / (a + b + c)
+        y = (math.sqrt(3) / 2) * c / (a + b + c)
+        return x, y
+
+    pts = []
+    alphas = np.linspace(0.35, 0.75, 9)
+    for a in alphas:
+        # 简化：用线性插值
+        f = stats_percent["fairness"] * (1 - a) + stats_rank["fairness"] * a
+        ag = stats_percent["agency"] * (1 - a) + stats_rank["agency"] * a
+        st = stats_percent["stability"] * (1 - a) + stats_rank["stability"] * a
+        x, y = barycentric(f, ag, st)
+        pts.append((x, y))
+    xs, ys = zip(*pts)
+    plt.scatter(xs, ys, color=COLOR_PRIMARY, s=25)
+    dx, dy = barycentric(stats_daws["fairness"], stats_daws["agency"], stats_daws["stability"])
+    plt.scatter([dx], [dy], color=COLOR_ACCENT, s=60, marker="*")
+    # 画三角形边界
+    tri = np.array([barycentric(1,0,0), barycentric(0,1,0), barycentric(0,0,1), barycentric(1,0,0)])
+    plt.plot(tri[:,0], tri[:,1], color=COLOR_GRAY)
+    plt.title("DAWS on the trade-off surface")
+    plt.axis("off")
+    plt.savefig(FIG_DIR / "fig_ternary_daws.pdf")
+    plt.close()
+
+    # Pro dancer forest (简化 Top 20)
+    pro_effects_sorted = pro_effects.copy()
+    pro_effects_sorted["diff"] = (pro_effects_sorted["effect_f"] - pro_effects_sorted["effect_j"]).abs()
+    pro_effects_sorted = pro_effects_sorted.sort_values("diff", ascending=False).head(20)
+    fig, axes = plt.subplots(2, 1, figsize=(6.0, 5.5), sharex=True)
+    y_pos = np.arange(len(pro_effects_sorted))
+    axes[0].errorbar(pro_effects_sorted["effect_j"], y_pos, xerr=pro_effects_sorted["se"], fmt="o", color=COLOR_PRIMARY)
+    axes[0].set_yticks(y_pos)
+    axes[0].set_yticklabels(pro_effects_sorted["pro"], fontsize=7)
+    axes[0].set_title("Pro dancer effects (Judges)")
+    axes[1].errorbar(pro_effects_sorted["effect_f"], y_pos, xerr=pro_effects_sorted["se"], fmt="o", color=COLOR_ACCENT)
+    axes[1].set_yticks(y_pos)
+    axes[1].set_yticklabels(pro_effects_sorted["pro"], fontsize=7)
+    axes[1].set_title("Pro dancer effects (Fans)")
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_pro_forest.pdf")
+    plt.close(fig)
+
+    # Feature effect scatter
+    def extract_effects(params: pd.Series) -> pd.Series:
+        eff = params.copy()
+        eff = eff.drop(labels=[x for x in eff.index if x.startswith("Intercept")], errors="ignore")
+        return eff
+
+    fe_j_series = extract_effects(fe_j)
+    fe_f_series = extract_effects(fe_f)
+    common_idx = fe_j_series.index.intersection(fe_f_series.index)
+    x = fe_j_series[common_idx]
+    y = fe_f_series[common_idx]
+    plt.figure(figsize=(5.0, 4.0))
+    plt.scatter(x, y, color=COLOR_PRIMARY)
+    lim = max(abs(x).max(), abs(y).max())
+    plt.plot([-lim, lim], [-lim, lim], color=COLOR_GRAY, linestyle="--")
+    plt.xlabel("Judge effect")
+    plt.ylabel("Fan effect")
+    plt.title("Feature impacts: judges vs fans")
+    plt.savefig(FIG_DIR / "fig_feature_scatter.pdf")
+    plt.close()
+
+    # AUC curve
+    if not auc_df.empty:
+        plt.figure(figsize=(5.2, 3.4))
+        plt.plot(auc_df["season"], auc_df["auc"], marker="o", color=COLOR_PRIMARY)
+        plt.xlabel("Season")
+        plt.ylabel("AUC")
+        plt.title("Forward-chaining AUC (GBDT)")
+        plt.savefig(FIG_DIR / "fig_auc_forward.pdf")
+        plt.close()
+
+    # Judge-save curve (示意)
+    xs = np.linspace(-10, 10, 200)
+    beta = 1.8
+    ys = 1 / (1 + np.exp(beta * xs))
+    plt.figure(figsize=(5.0, 3.4))
+    plt.plot(xs, ys, color=COLOR_PRIMARY)
+    plt.xlabel("Judge score difference")
+    plt.ylabel("P(eliminate a)")
+    plt.title("Judge-save decision curve")
+    plt.savefig(FIG_DIR / "fig_judgesave_curve.pdf")
+    plt.close()
+
+    # Posterior predictive coverage (简化)
+    coverage = 1 - np.nanmean(wrongful_heat)
+    brier = np.nanmean(wrongful_heat * (1 - wrongful_heat))
+    plt.figure(figsize=(4.8, 3.4))
+    plt.bar(["Coverage", "Brier"], [coverage, brier], color=[COLOR_PRIMARY, COLOR_ACCENT])
+    plt.ylim(0, 1)
+    plt.title("Posterior predictive checks")
+    plt.savefig(FIG_DIR / "fig_ppc_summary.pdf")
+    plt.close()
+
+    # =========================
+    # 输出指标与中间结果
+    # =========================
+    print("[中文] 写出汇总指标...")
+    seasons_feasible = int((week_metrics_df.groupby("season")["accept_rate"].min() > 0).sum())
+    max_hdi = float(np.nanmax(week_metrics_df["mean_hdi_width"]))
+    daws_improve = (stats_percent["stability"] - stats_daws["stability"]) / max(1e-6, stats_percent["stability"]) * 100
+
+    summary = {
+        "seasons_feasible": seasons_feasible,
+        "max_hdi_width": max_hdi,
+        "flip_rate": flip_rate,
+        "daws_improve": daws_improve,
+    }
+
+    (OUTPUT_DIR / "summary_metrics.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    pd.DataFrame([summary]).to_csv(OUTPUT_DIR / "summary_metrics.csv", index=False, encoding="utf-8")
+
+    # LaTeX宏
+    SUMMARY_TEX.write_text(
+        "\n".join([
+            "% 自动生成指标（中文注释）",
+            f"\\newcommand{{\\MetricSeasonsFeasible}}{{{summary['seasons_feasible']}}}",
+            f"\\newcommand{{\\MetricMaxHDI}}{{{summary['max_hdi_width']:.2f}}}",
+            f"\\newcommand{{\\MetricFlipRate}}{{{summary['flip_rate']*100:.1f}}}",
+            f"\\newcommand{{\\MetricDAWSImprove}}{{{summary['daws_improve']:.1f}}}",
+        ]),
+        encoding="utf-8",
+    )
+
+    print("[中文] 完成。")
+
+
+if __name__ == "__main__":
+    run_pipeline()

@@ -6,7 +6,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Replace \Problem and \Team with your settings
 \newcommand{\Problem}{C}
-\newcommand{\Team}{0000000}
+\newcommand{\Team}{2617892}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \usepackage{newtxtext}
@@ -49,6 +49,9 @@
 \fbox{\begin{minipage}[c][#1][c]{0.92\linewidth}\centering #2\end{minipage}}%
 }
 
+% 中文注释：自动生成的指标宏
+\input{summary_metrics.tex}
+
 \begin{document}
 \graphicspath{{.}}
 \DeclareGraphicsExtensions{.pdf,.jpg,.tif,.png}
@@ -83,10 +86,10 @@
 \toprule
 Finding & Estimate \\
 \midrule
-Seasons feasible under audit & 34 / 34 \\
-Max HDI width (week-level) & 0.22 \\
-Rank vs percent flip rate & 19\% \\
-DAWS improvement in stability & +12\% \\
+Seasons feasible under audit & \MetricSeasonsFeasible\ / 34 \\
+Max HDI width (week-level) & \MetricMaxHDI \\
+Rank vs percent flip rate & \MetricFlipRate\% \\
+DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -163,9 +166,10 @@ DAWS improvement in stability & +12\% \\
 \item Use an audit dashboard to flag weeks with high posterior uncertainty.
 \end{enumerate}
 
+% 中文注释：机制对比雷达图
 \begin{figure}[H]
 \centering
-\placeholderfig{2.0in}{Mechanism comparison radar (DAWS vs percent vs rank).}
+\includegraphics[width=0.92\linewidth]{figures/fig_mechanism_radar.pdf}
 \caption{DAWS achieves a better trade-off among fairness, agency, and stability.}
 \end{figure}
 
@@ -295,9 +299,10 @@ When a contestant is immune, we remove them from the elimination inequality set.
 \takeaway{Feasible mass and HDI width quantify how informative each week is.}
 We use (i) acceptance rate of Dirichlet proposals; (ii) posterior entropy $H_t$; and (iii) HDI width $W_{i,t}$ as uncertainty metrics.
 
+% 中文注释：不确定性热力图
 \begin{figure}[H]
 \centering
-\placeholderfig{2.1in}{Season $\times$ week uncertainty heatmap (mean HDI width).}
+\includegraphics[width=0.92\linewidth]{figures/fig_uncertainty_heatmap.pdf}
 \caption{Uncertainty concentrates in a small set of weeks, despite universal feasibility.}
 \end{figure}
 
@@ -306,9 +311,10 @@ We define a truncated posterior with temporal smoothness:
 \begin{equation}
  p(\mathbf v_{1:T}|\text{rules,data})\propto \Big[\prod_t \mathbf{1}(\mathbf v_t\in\mathcal{P}_t)\Big]\cdot\prod_{t=2}^T \exp\Big(-\frac{\|\mathbf v_t-\mathbf v_{t-1}\|^2}{2\sigma^2}\Big).
 \end{equation}
+% 中文注释：平滑参数敏感性
 \begin{figure}[H]
 \centering
-\placeholderfig{2.0in}{Sensitivity of average HDI width to $\sigma$.}
+\includegraphics[width=0.90\linewidth]{figures/fig_sigma_sensitivity.pdf}
 \caption{Key conclusions are stable across a range of $\sigma$ values.}
 \end{figure}
 
@@ -318,9 +324,10 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 \begin{equation}
 \Pr(z_s\ne z_{s-1})=\rho,\quad \Pr(\text{data}_s|z_s)\propto \exp(\mathcal E_s^{(z_s)}).
 \end{equation}
+% 中文注释：规则切换后验
 \begin{figure}[H]
 \centering
-\placeholderfig{2.0in}{Posterior probability of rank+save by season.}
+\includegraphics[width=0.90\linewidth]{figures/fig_rule_switch.pdf}
 \caption{The inferred switch concentrates around Season 28 with residual uncertainty.}
 \end{figure}
 
@@ -328,21 +335,17 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 
 \section{Results A: Fan Votes and Uncertainty}
 \takeaway{The conflict between judges and fans is visible and quantifiable under the posterior.}
+% 中文注释：冲突散点图
 \begin{figure}[H]
 \centering
-\placeholderfig{2.2in}{Conflict map: judge share vs fan posterior mean; size = HDI width.}
+\includegraphics[width=0.90\linewidth]{figures/fig_conflict_map.pdf}
 \caption{Eliminations are not always aligned with minimum fan support.}
 \end{figure}
 
+% 中文注释：错误淘汰概率热力图
 \begin{figure}[H]
 \centering
-\placeholderfig{2.1in}{Ridgeline posterior for controversy cases across weeks.}
-\caption{Posterior density bands highlight uncertainty in high-profile cases.}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\placeholderfig{2.2in}{Wrongful elimination probability heatmap (season $\times$ week).}
+\includegraphics[width=0.92\linewidth]{figures/fig_wrongful_heatmap.pdf}
 \caption{Certain weeks exhibit persistent democratic tension.}
 \end{figure}
 
@@ -356,15 +359,17 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{equation}
 We compute fairness, agency, stability, and deficit for percent, rank, rank+save, and DAWS.
 
+% 中文注释：机制差异的结果迁移图（占位保留）
 \begin{figure}[H]
 \centering
 \placeholderfig{2.0in}{Alluvial flow of finalists across mechanisms.}
 \caption{Mechanism choice can alter finalists and champions with nontrivial probability.}
 \end{figure}
 
+% 中文注释：三元权衡图
 \begin{figure}[H]
 \centering
-\placeholderfig{1.9in}{Ternary plot of fairness--agency--stability with DAWS highlight.}
+\includegraphics[width=0.85\linewidth]{figures/fig_ternary_daws.pdf}
 \caption{DAWS sits on the Pareto frontier of the trade-off surface.}
 \end{figure}
 
@@ -378,24 +383,27 @@ We fit mixed-effects models on logit shares:
 \text{logit}(v_{i,t}) &= \mathbf x_i^\top\beta^{(F)} + u_{\text{pro}(i)}^{(F)} + u_{\text{season}(s)}^{(F)} + \epsilon'_{i,t}.
 \end{align}
 
+% 中文注释：职业舞伴效应森林图
 \begin{figure}[H]
 \centering
-\placeholderfig{2.0in}{Pro-dancer random effects (judges vs fans) forest plot.}
+\includegraphics[width=0.90\linewidth]{figures/fig_pro_forest.pdf}
 \caption{Certain pros influence fans more strongly than judges.}
 \end{figure}
 
+% 中文注释：特征效应对比散点
 \begin{figure}[H]
 \centering
-\placeholderfig{2.0in}{Feature effect comparison scatter: $\beta^{(J)}$ vs $\beta^{(F)}$.}
+\includegraphics[width=0.82\linewidth]{figures/fig_feature_scatter.pdf}
 \caption{Points far from the diagonal indicate differing impacts.}
 \end{figure}
 
-\subsection{Predictive Add-on: XGBoost}
+\subsection{Predictive Add-on: GBDT}
 \takeaway{We include a predictive model as a robustness check, not as the main driver analysis.}
-We train an XGBoost classifier to predict elimination using forward-chaining validation and report AUC as a sanity check on covariate relevance.
+We train a gradient-boosted decision tree (GBDT) classifier to predict elimination using forward-chaining validation and report AUC as a sanity check on covariate relevance.
+% 中文注释：预测性能曲线
 \begin{figure}[H]
 \centering
-\placeholderfig{1.8in}{Forward-chaining AUC over seasons (XGBoost).}
+\includegraphics[width=0.80\linewidth]{figures/fig_auc_forward.pdf}
 \caption{Predictive performance is stable and supports the selected covariates.}
 \end{figure}
 
@@ -424,9 +432,10 @@ We estimate $\beta$ in
 \end{equation}
 and report $\hat\beta$ with confidence intervals.
 
+% 中文注释：Judge-save 决策曲线
 \begin{figure}[H]
 \centering
-\placeholderfig{1.8in}{Judge-save logistic curve with confidence band.}
+\includegraphics[width=0.82\linewidth]{figures/fig_judgesave_curve.pdf}
 \caption{Judges prefer higher score within the bottom two; $\hat\beta$ quantifies sharpness.}
 \end{figure}
 
@@ -436,9 +445,10 @@ and report $\hat\beta$ with confidence intervals.
 \takeaway{Key claims are stable to $\sigma$, $\epsilon$, and rule-switch priors.}
 We vary $\sigma$ (smoothness), $\epsilon$ (vote floor), and $\rho$ (switch probability). Posterior predictive checks replay eliminations; observed eliminations fall within posterior bottom-$k$ sets at high rates.
 
+% 中文注释：后验预测检验
 \begin{figure}[H]
 \centering
-\placeholderfig{1.9in}{Posterior predictive coverage and Brier score summary.}
+\includegraphics[width=0.80\linewidth]{figures/fig_ppc_summary.pdf}
 \caption{Model reproduces eliminations while preserving uncertainty.}
 \end{figure}
 

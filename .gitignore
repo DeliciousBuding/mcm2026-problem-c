@@ -1,0 +1,13 @@
+# Build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.toc
+paper/*.fls
+paper/*.fdb_latexmk
+
+# Runtime logs
+outputs/run.log
+
+# Editor files
+*.tmp
