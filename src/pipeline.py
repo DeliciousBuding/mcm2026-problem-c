@@ -1359,22 +1359,24 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.savefig(FIG_DIR / "fig_pareto_2d.pdf")
     plt.close()
 
-    # Pro dancer forest (简化 Top 20)
+    # Pro dancer effects difference (Top 20)
+    def clean_pro_name(name: str) -> str:
+        return re.sub(r"\s*\(.*\)$", "", str(name)).strip()
+
     pro_effects_sorted = pro_effects.copy()
-    pro_effects_sorted["diff"] = (pro_effects_sorted["effect_f"] - pro_effects_sorted["effect_j"]).abs()
-    pro_effects_sorted = pro_effects_sorted.sort_values("diff", ascending=False).head(20)
-    fig, axes = plt.subplots(2, 1, figsize=(6.0, 5.5), sharex=True)
+    pro_effects_sorted["pro_clean"] = pro_effects_sorted["pro"].apply(clean_pro_name)
+    pro_effects_sorted["diff"] = pro_effects_sorted["effect_f"] - pro_effects_sorted["effect_j"]
+    pro_effects_sorted = pro_effects_sorted.sort_values("diff", ascending=False, key=lambda s: s.abs()).head(20)
+    fig, ax = plt.subplots(1, 1, figsize=(6.2, 5.2))
     y_pos = np.arange(len(pro_effects_sorted))
-    axes[0].errorbar(pro_effects_sorted["effect_j"], y_pos, xerr=pro_effects_sorted["se"], fmt="o", color=COLOR_PRIMARY)
-    axes[0].set_yticks(y_pos)
-    axes[0].set_yticklabels(pro_effects_sorted["pro"], fontsize=7)
-    axes[0].set_title("Pro dancer effects (Judges)")
-    axes[1].errorbar(pro_effects_sorted["effect_f"], y_pos, xerr=pro_effects_sorted["se"], fmt="o", color=COLOR_ACCENT)
-    axes[1].set_yticks(y_pos)
-    axes[1].set_yticklabels(pro_effects_sorted["pro"], fontsize=7)
-    axes[1].set_title("Pro dancer effects (Fans)")
+    ax.errorbar(pro_effects_sorted["diff"], y_pos, xerr=pro_effects_sorted["se"], fmt="o", color=COLOR_ACCENT)
+    ax.axvline(0, color=COLOR_GRAY, linestyle="--", linewidth=0.9)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(pro_effects_sorted["pro_clean"], fontsize=7)
+    ax.set_xlabel("Effect difference (Fans - Judges)")
+    ax.set_title("Pro dancer effects: fans vs judges")
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_pro_forest.pdf")
+    plt.savefig(FIG_DIR / "fig_pro_diff_forest.pdf")
     plt.close(fig)
 
     # Feature effect scatter
@@ -1392,6 +1394,16 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.scatter(x, y, color=COLOR_PRIMARY)
     lim = max(abs(x).max(), abs(y).max())
     plt.plot([-lim, lim], [-lim, lim], color=COLOR_GRAY, linestyle="--")
+    # annotate most divergent features
+    dist = (y - x).abs()
+    top_idx = dist.sort_values(ascending=False).head(5).index
+    for idx in top_idx:
+        label = (
+            str(idx)
+            .replace("celebrity_industry_", "ind:")
+            .replace("ballroom_partner_", "pro:")
+        )
+        plt.annotate(label, (x[idx], y[idx]), fontsize=7, alpha=0.8)
     plt.xlabel("Judge effect")
     plt.ylabel("Fan effect")
     plt.title("Feature impacts: judges vs fans")
