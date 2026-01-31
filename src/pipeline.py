@@ -327,12 +327,6 @@ def run_pipeline() -> None:
         # 计算HDI
         if len(samples) == 0:
             continue
-        if len(samples) > MAX_SAMPLES_PER_WEEK:
-            idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
-            samples = samples[idx]
-        if len(samples) > MAX_SAMPLES_PER_WEEK:
-            idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
-            samples = samples[idx]
         # 抽样降采样，控制计算量
         if len(samples) > MAX_SAMPLES_PER_WEEK:
             idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
@@ -473,23 +467,28 @@ def run_pipeline() -> None:
         # 平滑alpha_t（简单周内处理）
         alpha_t = float(np.clip(alpha_t, alpha_min, alpha_max))
 
+        # --- 向量化评估 (Vectorized Evaluation) ---
         m = len(samples)
         j_share = active_df["judge_share"].to_numpy()
         j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
         j_scores = active_df["judge_total"].to_numpy()
+        j_share_matrix = np.tile(j_share, (m, 1))
 
-        # 各机制淘汰（向量化）
-        comb_percent = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * samples
+        # Percent 淘汰
+        comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples
         elim_p = np.argmin(comb_percent, axis=1)
 
+        # Rank 淘汰
         fan_rank = np.argsort(np.argsort(-samples, axis=1), axis=1) + 1
-        comb_rank = fan_rank + j_rank
+        j_rank_matrix = np.tile(j_rank, (m, 1))
+        comb_rank = fan_rank + j_rank_matrix
         elim_r = np.argmax(comb_rank, axis=1)
 
-        comb_daws = alpha_t * j_share + (1 - alpha_t) * samples
+        # DAWS 淘汰
+        comb_daws = alpha_t * j_share_matrix + (1 - alpha_t) * samples
         elim_d = np.argmin(comb_daws, axis=1)
 
-        # judge-save：bottom two + logistic
+        # judge-save：bottom two + logistic（向量化）
         bottom_two = np.argpartition(comb_rank, -2, axis=1)[:, -2:]
         a_idx = bottom_two[:, 0]
         b_idx = bottom_two[:, 1]
@@ -498,14 +497,27 @@ def run_pipeline() -> None:
         rand_u = RNG.random(m)
         elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
 
-        # fairness（Kendall tau）
-        taus = []
-        for fr in fan_rank:
-            taus.append(kendalltau(j_rank, fr).correlation)
-        if len(taus) == 0 or np.all(np.isnan(taus)):
+        # fairness（Kendall tau 近似，向量化）
+        n = len(j_rank)
+        if n < 2:
             tau_mean = float("nan")
         else:
-            tau_mean = float(np.nanmean(taus))
+            i_idx, j_idx = np.triu_indices(n, k=1)
+            sign_j = np.sign(j_rank[i_idx] - j_rank[j_idx])
+            valid = sign_j != 0
+            if not np.any(valid):
+                tau_mean = float("nan")
+            else:
+                i_idx = i_idx[valid]
+                j_idx = j_idx[valid]
+                sign_j = sign_j[valid]
+                sign_f = np.sign(fan_rank[:, i_idx] - fan_rank[:, j_idx])
+                prod = sign_f * sign_j
+                concordant = np.sum(prod > 0, axis=1)
+                discordant = np.sum(prod < 0, axis=1)
+                denom = len(sign_j)
+                tau_vals = (concordant - discordant) / max(1, denom)
+                tau_mean = float(np.mean(tau_vals))
 
         # viewer agency
         fan_lowest = np.argmin(samples, axis=1)
@@ -518,7 +530,7 @@ def run_pipeline() -> None:
         noise = RNG.normal(0, 0.02, size=samples.shape)
         v_noise = np.maximum(samples + noise, EPSILON)
         v_noise = v_noise / v_noise.sum(axis=1, keepdims=True)
-        elim_noise = np.argmin(ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_noise, axis=1)
+        elim_noise = np.argmin(ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * v_noise, axis=1)
 
         instability_p = np.mean(elim_p != elim_noise)
         instability_r = np.mean(elim_r != elim_noise)

@@ -5,6 +5,7 @@ paper/*.out
 paper/*.toc
 paper/*.fls
 paper/*.fdb_latexmk
+paper/*.synctex.gz
 
 # Runtime logs
 outputs/run.log
