@@ -49,7 +49,7 @@
 \fbox{\begin{minipage}[c][#1][c]{0.92\linewidth}\centering #2\end{minipage}}%
 }
 
-% 中文注释：自动生成的指标宏
+% 自动生成的指标宏
 \input{summary_metrics.tex}
 
 \begin{document}
@@ -166,7 +166,7 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \item Use an audit dashboard to flag weeks with high posterior uncertainty.
 \end{enumerate}
 
-% 中文注释：机制对比雷达图
+% 机制对比雷达图
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_mechanism_radar.pdf}
@@ -299,7 +299,7 @@ When a contestant is immune, we remove them from the elimination inequality set.
 \takeaway{Feasible mass and HDI width quantify how informative each week is.}
 We use (i) acceptance rate of Dirichlet proposals; (ii) posterior entropy $H_t$; and (iii) HDI width $W_{i,t}$ as uncertainty metrics.
 
-% 中文注释：不确定性热力图
+% 不确定性热力图
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_uncertainty_heatmap.pdf}
@@ -311,7 +311,7 @@ We define a truncated posterior with temporal smoothness:
 \begin{equation}
  p(\mathbf v_{1:T}|\text{rules,data})\propto \Big[\prod_t \mathbf{1}(\mathbf v_t\in\mathcal{P}_t)\Big]\cdot\prod_{t=2}^T \exp\Big(-\frac{\|\mathbf v_t-\mathbf v_{t-1}\|^2}{2\sigma^2}\Big).
 \end{equation}
-% 中文注释：平滑参数敏感性
+% 平滑参数敏感性
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_sigma_sensitivity.pdf}
@@ -324,7 +324,7 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 \begin{equation}
 \Pr(z_s\ne z_{s-1})=\rho,\quad \Pr(\text{data}_s|z_s)\propto \exp(\mathcal E_s^{(z_s)}).
 \end{equation}
-% 中文注释：规则切换后验
+% 规则切换后验
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_rule_switch.pdf}
@@ -335,21 +335,21 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 
 \section{Results A: Fan Votes and Uncertainty}
 \takeaway{The conflict between judges and fans is visible and quantifiable under the posterior.}
-% 中文注释：冲突散点图
+% 冲突散点图
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_conflict_map.pdf}
 \caption{Eliminations are not always aligned with minimum fan support.}
 \end{figure}
 
-% 中文注释：争议人物周序分布
+% 争议人物周序分布
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_controversy_ridgeline.pdf}
 \caption{Posterior density bands highlight uncertainty in high-profile cases.}
 \end{figure}
 
-% 中文注释：错误淘汰概率热力图
+% 错误淘汰概率热力图
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_wrongful_heatmap.pdf}
@@ -366,14 +366,14 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{equation}
 We compute fairness, agency, stability, and deficit for percent, rank, rank+save, and DAWS.
 
-% 中文注释：机制差异的结果迁移图（占位保留）
+% 机制差异的结果迁移图（占位保留）
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_alluvial_finalists.pdf}
 \caption{Mechanism choice can alter finalists and champions with nontrivial probability.}
 \end{figure}
 
-% 中文注释：三元权衡图
+% 三元权衡图
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\linewidth]{figures/fig_ternary_daws.pdf}
@@ -390,14 +390,14 @@ We fit mixed-effects models on logit shares:
 \text{logit}(v_{i,t}) &= \mathbf x_i^\top\beta^{(F)} + u_{\text{pro}(i)}^{(F)} + u_{\text{season}(s)}^{(F)} + \epsilon'_{i,t}.
 \end{align}
 
-% 中文注释：职业舞伴效应森林图
+% 职业舞伴效应森林图
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_pro_forest.pdf}
 \caption{Certain pros influence fans more strongly than judges.}
 \end{figure}
 
-% 中文注释：特征效应对比散点
+% 特征效应对比散点
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\linewidth]{figures/fig_feature_scatter.pdf}
@@ -407,7 +407,7 @@ We fit mixed-effects models on logit shares:
 \subsection{Predictive Add-on: GBDT}
 \takeaway{We include a predictive model as a robustness check, not as the main driver analysis.}
 We train a gradient-boosted decision tree (GBDT) classifier to predict elimination using forward-chaining validation and report AUC as a sanity check on covariate relevance.
-% 中文注释：预测性能曲线
+% 预测性能曲线
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.80\linewidth]{figures/fig_auc_forward.pdf}
@@ -439,7 +439,7 @@ We estimate $\beta$ in
 \end{equation}
 and report $\hat\beta$ with confidence intervals.
 
-% 中文注释：Judge-save 决策曲线
+% Judge-save 决策曲线
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.82\linewidth]{figures/fig_judgesave_curve.pdf}
@@ -452,7 +452,7 @@ and report $\hat\beta$ with confidence intervals.
 \takeaway{Key claims are stable to $\sigma$, $\epsilon$, and rule-switch priors.}
 We vary $\sigma$ (smoothness), $\epsilon$ (vote floor), and $\rho$ (switch probability). Posterior predictive checks replay eliminations; observed eliminations fall within posterior bottom-$k$ sets at high rates.
 
-% 中文注释：后验预测检验
+% 后验预测检验
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.80\linewidth]{figures/fig_ppc_summary.pdf}
