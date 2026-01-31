@@ -352,12 +352,29 @@ def evaluate_mechanisms(
     noise = rng.normal(0, 0.02, size=samples.shape)
     v_noise = np.maximum(samples + noise, eps)
     v_noise = v_noise / v_noise.sum(axis=1, keepdims=True)
-    elim_noise = np.argmin(ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * v_noise, axis=1)
 
-    instability_p = np.mean(elim_p != elim_noise)
-    instability_r = np.mean(elim_r != elim_noise)
-    instability_s = np.mean(elim_s != elim_noise)
-    instability_d = np.mean(elim_d != elim_noise)
+    comb_percent_noise = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * v_noise
+    elim_noise_p = np.argmin(comb_percent_noise, axis=1)
+
+    fan_rank_noise = np.argsort(np.argsort(-v_noise, axis=1), axis=1) + 1
+    comb_rank_noise = fan_rank_noise + j_rank_matrix
+    elim_noise_r = np.argmax(comb_rank_noise, axis=1)
+
+    comb_daws_noise = alpha_t * j_share_matrix + (1 - alpha_t) * v_noise
+    elim_noise_d = np.argmin(comb_daws_noise, axis=1)
+
+    bottom_two_noise = np.argpartition(comb_rank_noise, -2, axis=1)[:, -2:]
+    a_n = bottom_two_noise[:, 0]
+    b_n = bottom_two_noise[:, 1]
+    diff_n = j_scores[b_n] - j_scores[a_n]
+    p_elim_a_n = 1 / (1 + np.exp(1.8 * diff_n))
+    rand_u_n = rng.random(m)
+    elim_noise_s = np.where(rand_u_n < p_elim_a_n, a_n, b_n)
+
+    instability_p = np.mean(elim_p != elim_noise_p)
+    instability_r = np.mean(elim_r != elim_noise_r)
+    instability_s = np.mean(elim_s != elim_noise_s)
+    instability_d = np.mean(elim_d != elim_noise_d)
 
     return {
         "percent": {"fairness": tau_mean, "agency": agency_p, "instability": instability_p, "judge_integrity": integrity_p},
