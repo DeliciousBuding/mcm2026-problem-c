@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -17,7 +20,6 @@ import matplotlib
 matplotlib.use("Agg")  # 使用非交互式后端便于批量导图
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import kendalltau
 from scipy.ndimage import gaussian_filter1d
 import pulp
 import statsmodels.formula.api as smf
@@ -36,13 +38,15 @@ LOG_PATH = OUTPUT_DIR / "run.log"
 
 EPSILON = 0.001  # 投票占比下限
 ALPHA_PERCENT = 0.5  # 百分比规则权重
-N_PROPOSALS = 250  # 每周Dirichlet提案数量
+N_PROPOSALS = int(os.getenv("MCM_N_PROPOSALS", "250"))  # 每周Dirichlet提案数量
 MIN_ACCEPT = 40  # 最少保留的可行样本
 SIGMA_LIST = [0.5, 1.0, 1.5, 2.0]
 RHO_SWITCH = 0.10  # 规则切换先验概率
 COMPUTE_BOUNDS = False  # 是否计算LP边界（耗时）
 USE_MIXED_MODEL = False  # 是否使用混合效应模型
 MAX_SAMPLES_PER_WEEK = 120  # 每周用于指标的最大样本数
+USE_MULTIPROCESSING = os.getenv("MCM_MULTIPROC", "1") != "0"  # 是否启用多进程
+PARALLEL_WORKERS = int(os.getenv("MCM_WORKERS", str(max(1, (os.cpu_count() or 2) - 2))))  # 并行进程数
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
@@ -175,8 +179,16 @@ def percent_constraints_ok(v: np.ndarray, j_share: np.ndarray, elim_idx: List[in
     return True
 
 
-def sample_week_percent(week_df: pd.DataFrame, alpha: float, epsilon: float, n_props: int) -> Tuple[np.ndarray, float]:
+def sample_week_percent(
+    week_df: pd.DataFrame,
+    alpha: float,
+    epsilon: float,
+    n_props: int,
+    rng: np.random.Generator | None = None,
+) -> Tuple[np.ndarray, float]:
     # --- 极速向量化版本 (无需思考，直接用) ---
+    if rng is None:
+        rng = RNG
     active_df = week_df[week_df["active"]].copy()
     n = len(active_df)
     if n == 0:
@@ -186,7 +198,7 @@ def sample_week_percent(week_df: pd.DataFrame, alpha: float, epsilon: float, n_p
     elim_idx = [i for i, flag in enumerate(active_df["is_eliminated_week"].to_numpy()) if flag]
 
     # 1. 批量生成随机提案
-    proposals = RNG.dirichlet(np.ones(n), size=n_props)
+    proposals = rng.dirichlet(np.ones(n), size=n_props)
     proposals = np.maximum(proposals, epsilon)
     proposals = proposals / proposals.sum(axis=1, keepdims=True)
 
@@ -214,6 +226,73 @@ def sample_week_percent(week_df: pd.DataFrame, alpha: float, epsilon: float, n_p
 def lp_bounds_and_slack(week_df, alpha, epsilon, compute_bounds):
     # --- 哑函数 (直接跳过耗时计算) ---
     return {}, 0.001
+
+
+def process_season_samples(
+    task: Tuple[int, pd.DataFrame, float, float, int, bool, int],
+) -> Dict[str, object]:
+    """按赛季并行计算后验与周指标。"""
+    season, season_df, alpha, epsilon, n_props, compute_bounds, seed = task
+    rng = np.random.default_rng(seed)
+
+    posterior_records: List[Dict[str, object]] = []
+    week_metrics: List[Dict[str, object]] = []
+    samples_cache: Dict[Tuple[int, int], np.ndarray] = {}
+    acc_cache: Dict[Tuple[int, int], float] = {}
+    slack_cache: Dict[Tuple[int, int], float] = {}
+
+    for week, wdf in season_df.groupby("week", sort=True):
+        active_df = wdf[wdf["active"]].copy()
+        if len(active_df) == 0:
+            continue
+
+        samples, acc_rate = sample_week_percent(wdf, alpha, epsilon, n_props, rng)
+        _, slack = lp_bounds_and_slack(wdf, alpha, epsilon, compute_bounds)
+
+        key = (int(season), int(week))
+        samples_cache[key] = samples
+        acc_cache[key] = acc_rate
+        slack_cache[key] = slack
+
+        if len(samples) == 0:
+            continue
+
+        lower = np.quantile(samples, 0.025, axis=0)
+        upper = np.quantile(samples, 0.975, axis=0)
+        mean = samples.mean(axis=0)
+        hdi_width = upper - lower
+
+        for i, row in active_df.reset_index(drop=True).iterrows():
+            posterior_records.append({
+                "season": season,
+                "week": week,
+                "celebrity_name": row["celebrity_name"],
+                "ballroom_partner": row["ballroom_partner"],
+                "celebrity_industry": row["celebrity_industry"],
+                "celebrity_age_during_season": row["celebrity_age_during_season"],
+                "judge_share": row["judge_share"],
+                "fan_share_mean": mean[i],
+                "fan_share_lower": lower[i],
+                "fan_share_upper": upper[i],
+                "hdi_width": hdi_width[i],
+                "is_eliminated_week": row["is_eliminated_week"],
+            })
+
+        week_metrics.append({
+            "season": season,
+            "week": week,
+            "accept_rate": acc_rate,
+            "slack": slack,
+            "mean_hdi_width": float(np.mean(hdi_width)),
+        })
+
+    return {
+        "posterior_records": posterior_records,
+        "week_metrics": week_metrics,
+        "samples_cache": samples_cache,
+        "acc_cache": acc_cache,
+        "slack_cache": slack_cache,
+    }
 
 
 # =========================
@@ -285,12 +364,14 @@ def run_pipeline() -> None:
     ensure_dirs()
     set_plot_style()
     LOG_PATH.write_text("", encoding="utf-8")
+    t_start = time.perf_counter()
 
     log("Load data...")
     df = load_data()
     long_df = build_long_df(df)
     log(f"Raw rows: {len(df)}, Long rows: {len(long_df)}")
     log(f"Seasons: {long_df['season'].nunique()}, Weeks: {long_df['week'].nunique()}")
+    log(f"Config: N_PROPOSALS={N_PROPOSALS}, MULTIPROC={USE_MULTIPROCESSING}, WORKERS={PARALLEL_WORKERS}")
 
     # 计算judge share
     long_df["judge_share"] = long_df.groupby(["season", "week"])['judge_total'].transform(
@@ -307,58 +388,86 @@ def run_pipeline() -> None:
     slack_cache: Dict[Tuple[int, int], float] = {}
 
     log("Sampling feasible sets and computing uncertainty...")
-    for (season, week), wdf in season_week_groups:
-        active_df = wdf[wdf["active"]].copy()
-        if len(active_df) == 0:
-            continue
+    if USE_MULTIPROCESSING:
+        cols = [
+            "celebrity_name",
+            "ballroom_partner",
+            "celebrity_industry",
+            "celebrity_age_during_season",
+            "season",
+            "week",
+            "judge_total",
+            "judge_share",
+            "active",
+            "is_eliminated_week",
+        ]
+        tasks = []
+        for season, sdf in long_df.groupby("season", sort=True):
+            season_df = sdf[cols].copy()
+            seed = 20260131 + int(season) * 1000
+            tasks.append((int(season), season_df, ALPHA_PERCENT, EPSILON, N_PROPOSALS, COMPUTE_BOUNDS, seed))
 
-        key = (int(season), int(week))
-        if key in samples_cache:
-            samples = samples_cache[key]
-            acc_rate = acc_cache[key]
-            slack = slack_cache[key]
-        else:
-            samples, acc_rate = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, N_PROPOSALS)
-            _, slack = lp_bounds_and_slack(wdf, ALPHA_PERCENT, EPSILON, COMPUTE_BOUNDS)
-            samples_cache[key] = samples
-            acc_cache[key] = acc_rate
-            slack_cache[key] = slack
+        log(f"Parallel sampling by season... tasks={len(tasks)}")
+        with ProcessPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+            for res in executor.map(process_season_samples, tasks, chunksize=1):
+                posterior_records.extend(res["posterior_records"])
+                week_metrics.extend(res["week_metrics"])
+                samples_cache.update(res["samples_cache"])
+                acc_cache.update(res["acc_cache"])
+                slack_cache.update(res["slack_cache"])
+    else:
+        for (season, week), wdf in season_week_groups:
+            active_df = wdf[wdf["active"]].copy()
+            if len(active_df) == 0:
+                continue
 
-        # 计算HDI
-        if len(samples) == 0:
-            continue
-        # 抽样降采样，控制计算量
-        if len(samples) > MAX_SAMPLES_PER_WEEK:
-            idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
-            samples = samples[idx]
-        lower = np.quantile(samples, 0.025, axis=0)
-        upper = np.quantile(samples, 0.975, axis=0)
-        mean = samples.mean(axis=0)
-        hdi_width = upper - lower
+            key = (int(season), int(week))
+            if key in samples_cache:
+                samples = samples_cache[key]
+                acc_rate = acc_cache[key]
+                slack = slack_cache[key]
+            else:
+                samples, acc_rate = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, N_PROPOSALS)
+                _, slack = lp_bounds_and_slack(wdf, ALPHA_PERCENT, EPSILON, COMPUTE_BOUNDS)
+                samples_cache[key] = samples
+                acc_cache[key] = acc_rate
+                slack_cache[key] = slack
 
-        for i, row in active_df.reset_index(drop=True).iterrows():
-            posterior_records.append({
+            # 计算HDI
+            if len(samples) == 0:
+                continue
+            # 抽样降采样，控制计算量
+            if len(samples) > MAX_SAMPLES_PER_WEEK:
+                idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
+                samples = samples[idx]
+            lower = np.quantile(samples, 0.025, axis=0)
+            upper = np.quantile(samples, 0.975, axis=0)
+            mean = samples.mean(axis=0)
+            hdi_width = upper - lower
+
+            for i, row in active_df.reset_index(drop=True).iterrows():
+                posterior_records.append({
+                    "season": season,
+                    "week": week,
+                    "celebrity_name": row["celebrity_name"],
+                    "ballroom_partner": row["ballroom_partner"],
+                    "celebrity_industry": row["celebrity_industry"],
+                    "celebrity_age_during_season": row["celebrity_age_during_season"],
+                    "judge_share": row["judge_share"],
+                    "fan_share_mean": mean[i],
+                    "fan_share_lower": lower[i],
+                    "fan_share_upper": upper[i],
+                    "hdi_width": hdi_width[i],
+                    "is_eliminated_week": row["is_eliminated_week"],
+                })
+
+            week_metrics.append({
                 "season": season,
                 "week": week,
-                "celebrity_name": row["celebrity_name"],
-                "ballroom_partner": row["ballroom_partner"],
-                "celebrity_industry": row["celebrity_industry"],
-                "celebrity_age_during_season": row["celebrity_age_during_season"],
-                "judge_share": row["judge_share"],
-                "fan_share_mean": mean[i],
-                "fan_share_lower": lower[i],
-                "fan_share_upper": upper[i],
-                "hdi_width": hdi_width[i],
-                "is_eliminated_week": row["is_eliminated_week"],
+                "accept_rate": acc_rate,
+                "slack": slack,
+                "mean_hdi_width": float(np.mean(hdi_width)),
             })
-
-        week_metrics.append({
-            "season": season,
-            "week": week,
-            "accept_rate": acc_rate,
-            "slack": slack,
-            "mean_hdi_width": float(np.mean(hdi_width)),
-        })
 
     posterior_df = pd.DataFrame(posterior_records)
     week_metrics_df = pd.DataFrame(week_metrics)
@@ -1001,6 +1110,8 @@ def run_pipeline() -> None:
         encoding="utf-8",
     )
 
+    elapsed = time.perf_counter() - t_start
+    log(f"Runtime: {elapsed:.2f}s")
     log("Done.")
 
 
