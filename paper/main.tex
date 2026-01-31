@@ -182,6 +182,22 @@ We observe weekly judge scores and eliminations, but fan votes are latent. Our g
 
 \textbf{Contributions.} (i) Polytope inversion audit of fan shares with slack diagnostics; (ii) MaxEnt posterior with temporal smoothness and uncertainty quantification; (iii) unified counterfactual mechanism evaluation plus a DAWS design with theoretical properties.
 
+\subsection{Task-to-Section Mapping}
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}p{0.08\linewidth}p{0.52\linewidth}p{0.22\linewidth}@{}}
+\toprule
+Task & What we do & Main output \\\\
+\midrule
+1 & Polytope inversion and posterior fan shares & Fan HDI bands \\\\
+2 & Percent vs rank counterfactuals and rule switch & Deficit and flips \\\\
+3 & Judges vs fans dual models & Effect differences \\\\
+4 & Fairness/agency/stability metrics & Metric matrix \\\\
+5 & DAWS design and Pareto analysis & Recommended rule \\\\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \keyoutput{A full pipeline that maps observed eliminations to a feasible fan-vote polytope, posterior samples, and mechanism metrics.}
 
 \section{Data and Rules}
@@ -272,6 +288,9 @@ For each week, constraints from the rule define a polytope $\mathcal{P}_t\subset
 \end{algorithmic}
 \end{algorithm}
 
+\subsection{Rule-adaptive Weeks}
+\takeaway{We extend the constraints to handle immunity, double eliminations, and irregular weeks.}
+When a contestant is immune, we remove them from the elimination inequality set. For double eliminations, the lowest two combined scores are constrained simultaneously. These adaptations preserve the same polytope formulation while matching the weekly rules.
 \subsection{Identifiability and Feasible Mass}
 \takeaway{Feasible mass and HDI width quantify how informative each week is.}
 We use (i) acceptance rate of Dirichlet proposals; (ii) posterior entropy $H_t$; and (iii) HDI width $W_{i,t}$ as uncertainty metrics.
@@ -313,6 +332,12 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 \centering
 \placeholderfig{2.2in}{Conflict map: judge share vs fan posterior mean; size = HDI width.}
 \caption{Eliminations are not always aligned with minimum fan support.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\placeholderfig{2.1in}{Ridgeline posterior for controversy cases across weeks.}
+\caption{Posterior density bands highlight uncertainty in high-profile cases.}
 \end{figure}
 
 \begin{figure}[H]
@@ -363,6 +388,15 @@ We fit mixed-effects models on logit shares:
 \centering
 \placeholderfig{2.0in}{Feature effect comparison scatter: $\beta^{(J)}$ vs $\beta^{(F)}$.}
 \caption{Points far from the diagonal indicate differing impacts.}
+\end{figure}
+
+\subsection{Predictive Add-on: XGBoost}
+\takeaway{We include a predictive model as a robustness check, not as the main driver analysis.}
+We train an XGBoost classifier to predict elimination using forward-chaining validation and report AUC as a sanity check on covariate relevance.
+\begin{figure}[H]
+\centering
+\placeholderfig{1.8in}{Forward-chaining AUC over seasons (XGBoost).}
+\caption{Predictive performance is stable and supports the selected covariates.}
 \end{figure}
 
 \keyoutput{Dual models and a direct answer to Task 3: effects are not identical.}
