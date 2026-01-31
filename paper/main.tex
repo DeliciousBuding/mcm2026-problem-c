@@ -89,7 +89,12 @@ Finding & Estimate \\
 Seasons feasible under audit & \MetricSeasonsFeasible\ / 34 \\
 Max HDI width (week-level) & \MetricMaxHDI \\
 Mean HDI width (week-level) & \MetricMeanHDI \\
+Median HDI width (week-level) & \MetricMedianHDI \\
+P90 HDI width (week-level) & \MetricHDIPctNinety \\
+Max HDI width (week-level) & \MetricMaxHDI \\
 Rank vs percent flip rate & \MetricFlipRate\% \\
+DAWS stability & \MetricDAWSStability \\
+DAWS fairness (Kendall $\tau$) & \MetricDAWSFairness \\
 DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \bottomrule
 \end{tabular}
@@ -296,6 +301,31 @@ For each week, constraints from the rule define a polytope $\mathcal{P}_t\subset
 \subsection{Rule-adaptive Weeks}
 \takeaway{We extend the constraints to handle immunity, double eliminations, and irregular weeks.}
 When a contestant is immune, we remove them from the elimination inequality set. For double eliminations, the lowest two combined scores are constrained simultaneously. These adaptations preserve the same polytope formulation while matching the weekly rules.
+
+\subsection{Engineering Approximation and Validation}
+\takeaway{We use a fast approximate sampler in code and validate it against strict constraints to preserve headline conclusions.}
+Our theoretical framework is LP/MILP-based; however, the production pipeline uses a fast Dirichlet sampler with simplified feasibility checks for speed. We therefore validate the approximation by re-filtering the same proposals with strict feasibility (full elimination constraints) and comparing posterior summaries.
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+Validation metric & Value \\
+\midrule
+MAE of mean fan share & \MetricFastMAE \\
+Top-1 agreement (fast vs strict) & \MetricFastTopOne\% \\
+Top-2 agreement (fast vs strict) & \MetricFastTopTwo\% \\
+Fairness shift (percent) & \MetricFastDeltaFair \\
+Agency shift (percent) & \MetricFastDeltaAgency \\
+Flip-rate shift (percent vs rank) & \MetricFastDeltaFlip\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+The fast approximation preserves all headline conclusions: flip-rate and deficit estimates shift by less than a few percent under strict audit, while top-k agreement remains high.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\linewidth]{figures/fig_fast_vs_strict.pdf}
+\caption{Fast vs strict posterior means; deviations are small and concentrated near the diagonal.}
+\end{figure}
 \subsection{Identifiability and Feasible Mass}
 \takeaway{Feasible mass and HDI width quantify how informative each week is.}
 We use (i) acceptance rate of Dirichlet proposals; (ii) posterior entropy $H_t$; and (iii) HDI width $W_{i,t}$ as uncertainty metrics.
@@ -305,6 +335,12 @@ We use (i) acceptance rate of Dirichlet proposals; (ii) posterior entropy $H_t$;
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_uncertainty_heatmap.pdf}
 \caption{Uncertainty concentrates in a small set of weeks, despite universal feasibility.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\linewidth]{figures/fig_hdi_distribution.pdf}
+\caption{Distribution of weekly HDI widths; extreme weeks are rare.}
 \end{figure}
 
 \subsection{Truncated Posterior with Smoothness}
@@ -332,6 +368,12 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 \caption{The inferred switch concentrates around Season 28 with residual uncertainty.}
 \end{figure}
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_rule_switch_ci.pdf}
+\caption{Bootstrap uncertainty bands for the rule-switch probability.}
+\end{figure}
+
 \keyoutput{Polytope bounds, slack $S_t^*$, posterior samples, and rule-switch probabilities.}
 
 \section{Results A: Fan Votes and Uncertainty}
@@ -341,6 +383,12 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_conflict_map.pdf}
 \caption{Eliminations are not always aligned with minimum fan support.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_conflict_combo.pdf}
+\caption{Conflict map augmented with uncertainty (size) and wrongful eliminations (rings).}
 \end{figure}
 
 % 争议人物周序分布
@@ -379,6 +427,12 @@ We compute fairness, agency, stability, and deficit for percent, rank, rank+save
 \centering
 \includegraphics[width=0.85\linewidth]{figures/fig_ternary_daws.pdf}
 \caption{DAWS sits on the Pareto frontier of the trade-off surface.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.86\linewidth]{figures/fig_mechanism_compare.pdf}
+\caption{Numeric comparison of fairness, agency, and stability across mechanisms.}
 \end{figure}
 
 \keyoutput{Mechanism metrics, flip probabilities, and Pareto comparisons.}
@@ -461,7 +515,7 @@ We vary $\sigma$ (smoothness), $\epsilon$ (vote floor), and $\rho$ (switch proba
 \end{figure}
 
 \subsection{Scale Benchmark}
-We benchmark sampling scale with a multi-process setup and record runtime, error (mean HDI width), stability (DAWS), and theory-fit (Kendall $\tau$). The curves show diminishing returns in uncertainty reduction beyond mid-scale settings, while stability and fit remain consistent.
+We benchmark sampling scale with a multi-process setup and record runtime, error (mean HDI width), stability (DAWS), and theory-fit (Kendall $\tau$). The curves show diminishing returns in uncertainty reduction beyond mid-scale settings; the elbow (dashed line) marks our final scale choice.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_scale_benchmark.pdf}

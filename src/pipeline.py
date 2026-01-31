@@ -48,6 +48,10 @@ USE_MIXED_MODEL = False  # 是否使用混合效应模型
 MAX_SAMPLES_PER_WEEK = 120  # 每周用于指标的最大样本数
 USE_MULTIPROCESSING = os.getenv("MCM_MULTIPROC", "1") != "0"  # 是否启用多进程
 PARALLEL_WORKERS = int(os.getenv("MCM_WORKERS", str(max(1, (os.cpu_count() or 2) - 2))))  # 并行进程数
+FAST_STRICT_ENABLED = os.getenv("MCM_FAST_STRICT", "1") != "0"  # 是否进行 Fast vs Strict 校验
+FAST_STRICT_PROPS = int(os.getenv("MCM_STRICT_PROPS", "2000"))  # Strict 校验采样规模
+FAST_STRICT_MAX_SAMPLES = int(os.getenv("MCM_STRICT_MAX_SAMPLES", "600"))  # Strict 校验最大样本数
+RULE_SWITCH_BOOT = int(os.getenv("MCM_RULE_BOOT", "200"))  # 规则切换置信带 bootstrap 次数
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
@@ -229,6 +233,136 @@ def lp_bounds_and_slack(week_df, alpha, epsilon, compute_bounds):
     return {}, 0.001
 
 
+def compute_alpha_t(week: int, total_weeks: int, mean_width: float,
+                    alpha0: float, gamma: float, eta: float,
+                    alpha_min: float, alpha_max: float) -> float:
+    """根据不确定性调整 DAWS 权重。"""
+    base_alpha = alpha0 + gamma * (week / max(1, total_weeks)) - eta * mean_width
+    return float(np.clip(base_alpha, alpha_min, alpha_max))
+
+
+def apply_percent_mask(
+    proposals: np.ndarray,
+    j_share: np.ndarray,
+    elim_idx: List[int],
+    alpha: float,
+    mode: str,
+) -> np.ndarray:
+    """百分比规则约束：fast=任一淘汰者在底部，strict=所有淘汰者在底部。"""
+    if not elim_idx:
+        return np.ones(len(proposals), dtype=bool)
+    c_matrix = alpha * j_share + (1 - alpha) * proposals
+    min_scores = c_matrix.min(axis=1)
+    elim_scores = c_matrix[:, elim_idx]
+    if mode == "fast":
+        return (elim_scores <= min_scores[:, None] + 1e-12).any(axis=1)
+    return (elim_scores <= min_scores[:, None] + 1e-12).all(axis=1)
+
+
+def fallback_by_violation(
+    proposals: np.ndarray,
+    j_share: np.ndarray,
+    elim_idx: List[int],
+    alpha: float,
+    min_accept: int,
+) -> np.ndarray:
+    """当可行样本过少时，按违约度最小筛选。"""
+    if len(proposals) == 0:
+        return proposals
+    if not elim_idx:
+        return proposals[:min_accept]
+    c_matrix = alpha * j_share + (1 - alpha) * proposals
+    min_scores = c_matrix.min(axis=1)
+    elim_scores = c_matrix[:, elim_idx]
+    violations = np.max(elim_scores - min_scores[:, None], axis=1)
+    order = np.argsort(violations)
+    return proposals[order[:min_accept]]
+
+
+def evaluate_mechanisms(
+    samples: np.ndarray,
+    active_df: pd.DataFrame,
+    alpha_t: float,
+    eps: float,
+    rng: np.random.Generator,
+) -> Dict[str, object]:
+    """对给定样本计算机制指标（向量化）。"""
+    m = len(samples)
+    if m == 0:
+        return {}
+    j_share = active_df["judge_share"].to_numpy()
+    j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+    j_scores = active_df["judge_total"].to_numpy()
+    j_share_matrix = np.tile(j_share, (m, 1))
+
+    comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples
+    elim_p = np.argmin(comb_percent, axis=1)
+
+    fan_rank = np.argsort(np.argsort(-samples, axis=1), axis=1) + 1
+    j_rank_matrix = np.tile(j_rank, (m, 1))
+    comb_rank = fan_rank + j_rank_matrix
+    elim_r = np.argmax(comb_rank, axis=1)
+
+    comb_daws = alpha_t * j_share_matrix + (1 - alpha_t) * samples
+    elim_d = np.argmin(comb_daws, axis=1)
+
+    bottom_two = np.argpartition(comb_rank, -2, axis=1)[:, -2:]
+    a_idx = bottom_two[:, 0]
+    b_idx = bottom_two[:, 1]
+    diff = j_scores[b_idx] - j_scores[a_idx]
+    p_elim_a = 1 / (1 + np.exp(1.8 * diff))
+    rand_u = rng.random(m)
+    elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
+
+    n = len(j_rank)
+    if n < 2:
+        tau_mean = float("nan")
+    else:
+        i_idx, j_idx = np.triu_indices(n, k=1)
+        sign_j = np.sign(j_rank[i_idx] - j_rank[j_idx])
+        valid = sign_j != 0
+        if not np.any(valid):
+            tau_mean = float("nan")
+        else:
+            i_idx = i_idx[valid]
+            j_idx = j_idx[valid]
+            sign_j = sign_j[valid]
+            sign_f = np.sign(fan_rank[:, i_idx] - fan_rank[:, j_idx])
+            prod = sign_f * sign_j
+            concordant = np.sum(prod > 0, axis=1)
+            discordant = np.sum(prod < 0, axis=1)
+            denom = len(sign_j)
+            tau_vals = (concordant - discordant) / max(1, denom)
+            tau_mean = float(np.mean(tau_vals))
+    if np.isnan(tau_mean):
+        tau_mean = 0.0
+
+    fan_lowest = np.argmin(samples, axis=1)
+    agency_p = np.mean(fan_lowest == elim_p)
+    agency_r = np.mean(fan_lowest == elim_r)
+    agency_s = np.mean(fan_lowest == elim_s)
+    agency_d = np.mean(fan_lowest == elim_d)
+
+    noise = rng.normal(0, 0.02, size=samples.shape)
+    v_noise = np.maximum(samples + noise, eps)
+    v_noise = v_noise / v_noise.sum(axis=1, keepdims=True)
+    elim_noise = np.argmin(ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * v_noise, axis=1)
+
+    instability_p = np.mean(elim_p != elim_noise)
+    instability_r = np.mean(elim_r != elim_noise)
+    instability_s = np.mean(elim_s != elim_noise)
+    instability_d = np.mean(elim_d != elim_noise)
+
+    return {
+        "percent": {"fairness": tau_mean, "agency": agency_p, "instability": instability_p},
+        "rank": {"fairness": tau_mean, "agency": agency_r, "instability": instability_r},
+        "save": {"fairness": tau_mean, "agency": agency_s, "instability": instability_s},
+        "daws": {"fairness": tau_mean, "agency": agency_d, "instability": instability_d},
+        "flip_sum": float(np.sum(elim_p != elim_r)),
+        "count": m,
+    }
+
+
 def parse_scales(env_val: str | None) -> List[int]:
     """解析环境变量中的采样规模列表。"""
     if not env_val:
@@ -263,6 +397,24 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
         return
     fig, axes = plt.subplots(2, 2, figsize=(7.6, 5.6))
     x = df["n_proposals"]
+    # elbow 计算（基于 mean_hdi 的边际收益）
+    if len(df) >= 3:
+        x_norm = (x - x.min()) / max(1e-9, (x.max() - x.min()))
+        y = df["mean_hdi"]
+        y_norm = (y - y.min()) / max(1e-9, (y.max() - y.min()))
+        p1 = np.array([x_norm.iloc[0], y_norm.iloc[0]])
+        p2 = np.array([x_norm.iloc[-1], y_norm.iloc[-1]])
+        dist = []
+        x1, y1 = float(p1[0]), float(p1[1])
+        x2, y2 = float(p2[0]), float(p2[1])
+        den = math.hypot(y2 - y1, x2 - x1)
+        for xi, yi in zip(x_norm, y_norm):
+            num = abs((y2 - y1) * xi - (x2 - x1) * yi + x2 * y1 - y2 * x1)
+            dist.append(num / max(1e-9, den))
+        elbow_idx = int(np.argmax(dist))
+        elbow_x = x.iloc[elbow_idx]
+    else:
+        elbow_x = None
 
     axes[0, 0].plot(x, df["runtime_sec"], marker="o", color=COLOR_PRIMARY)
     axes[0, 0].set_title("Runtime vs Scale")
@@ -283,6 +435,11 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
     axes[1, 1].set_title("Theory Fit (Kendall tau) vs Scale")
     axes[1, 1].set_xlabel("N_PROPOSALS")
     axes[1, 1].set_ylabel("Tau")
+
+    if elbow_x is not None:
+        for ax in axes.flatten():
+            ax.axvline(elbow_x, color=COLOR_WARNING, linestyle="--", linewidth=1.0)
+        axes[0, 1].text(elbow_x, axes[0, 1].get_ylim()[1] * 0.92, "Elbow", ha="center", color=COLOR_WARNING, fontsize=8)
 
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_scale_benchmark.pdf")
@@ -535,6 +692,30 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     week_metrics_df = pd.DataFrame(week_metrics)
     log(f"Posterior rows: {len(posterior_df)}, Week metrics: {len(week_metrics_df)}")
 
+    # HDI 分布图
+    hdi_series = week_metrics_df["mean_hdi_width"].dropna()
+    q1 = float(hdi_series.quantile(0.25)) if not hdi_series.empty else float("nan")
+    median_hdi = float(hdi_series.quantile(0.50)) if not hdi_series.empty else float("nan")
+    q3 = float(hdi_series.quantile(0.75)) if not hdi_series.empty else float("nan")
+    p90 = float(hdi_series.quantile(0.90)) if not hdi_series.empty else float("nan")
+    if save_outputs and not hdi_series.empty:
+        plt.figure(figsize=(5.4, 3.6))
+        plt.hist(hdi_series, bins=18, color=COLOR_PRIMARY, alpha=0.65, edgecolor="white")
+        for val, label, color in [
+            (q1, "Q1", COLOR_GRAY),
+            (median_hdi, "Median", COLOR_ACCENT),
+            (q3, "Q3", COLOR_GRAY),
+            (p90, "P90", COLOR_WARNING),
+        ]:
+            plt.axvline(val, color=color, linestyle="--", linewidth=1.1)
+            plt.text(val, plt.ylim()[1] * 0.92, label, color=color, ha="center", fontsize=8)
+        plt.xlabel("Mean HDI width (week)")
+        plt.ylabel("Count")
+        plt.title("Distribution of weekly uncertainty")
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_hdi_distribution.pdf")
+        plt.close()
+
     # 不确定性热力图矩阵
     max_season = int(long_df["season"].max())
     max_week = int(long_df["week"].max())
@@ -567,6 +748,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     # 规则切换推断
     log("Inferring rule switch probabilities...")
     evidence_records = []
+    season_week_stats: Dict[int, Dict[str, List[float]]] = {}
     for season in sorted(long_df["season"].unique()):
         season_weeks = week_metrics_df[week_metrics_df["season"] == season]
         if season_weeks.empty:
@@ -585,6 +767,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "e_percent": e_percent,
             "e_rank": e_rank,
         })
+        season_week_stats[int(season)] = {
+            "acc": season_weeks["accept_rate"].clip(1e-6).tolist(),
+            "rank": [float(x) for x in rank_rates],
+        }
 
     evidence_df = pd.DataFrame(evidence_records)
     log(f"Rule switch seasons: {len(evidence_df)}")
@@ -601,6 +787,50 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         probs.append(post[1])
         prev = post
     evidence_df["prob_rank"] = probs
+
+    # 规则切换置信带（bootstrap）
+    if save_outputs and RULE_SWITCH_BOOT > 0 and not evidence_df.empty:
+        log("Bootstrapping rule-switch uncertainty...")
+        seasons_sorted = evidence_df["season"].to_list()
+        boot_probs = []
+        for _ in range(RULE_SWITCH_BOOT):
+            e_records = []
+            for season in seasons_sorted:
+                stats = season_week_stats.get(int(season), None)
+                if not stats:
+                    continue
+                acc_list = stats["acc"]
+                rank_list = stats["rank"]
+                n_weeks = len(acc_list)
+                idx = RNG.integers(0, n_weeks, size=n_weeks)
+                e_percent_b = float(np.sum(np.log(np.clip(np.array(acc_list)[idx], 1e-6, None))))
+                e_rank_b = float(np.sum(np.log(np.clip(np.array(rank_list)[idx], 1e-6, None))))
+                e_records.append((season, e_percent_b, e_rank_b))
+
+            prev_b = np.array([0.9, 0.1])
+            probs_b = []
+            for season, e_percent_b, e_rank_b in e_records:
+                like = np.array([math.exp(e_percent_b), math.exp(e_rank_b)])
+                post = prev_b @ trans
+                post = post * like
+                post = post / post.sum()
+                probs_b.append(post[1])
+                prev_b = post
+            if len(probs_b) == len(seasons_sorted):
+                boot_probs.append(probs_b)
+        if boot_probs:
+            boot_arr = np.array(boot_probs)
+            lower = np.quantile(boot_arr, 0.05, axis=0)
+            upper = np.quantile(boot_arr, 0.95, axis=0)
+            plt.figure(figsize=(5.8, 3.6))
+            plt.plot(evidence_df["season"], evidence_df["prob_rank"], color=COLOR_PRIMARY, marker="o")
+            plt.fill_between(evidence_df["season"], lower, upper, color=COLOR_PRIMARY, alpha=0.18)
+            plt.axvline(28, color=COLOR_GRAY, linestyle="--", linewidth=1.0)
+            plt.xlabel("Season")
+            plt.ylabel("P(rank+save)")
+            plt.title("Rule switch probability with uncertainty band")
+            plt.savefig(FIG_DIR / "fig_rule_switch_ci.pdf")
+            plt.close()
 
     # 机制评估
     log("Evaluating mechanism metrics...")
@@ -631,97 +861,22 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
         # 计算U_t
         mean_width = week_metrics_df[(week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)]["mean_hdi_width"].mean()
+        if np.isnan(mean_width):
+            mean_width = 0.0
         T = active_df["week"].max()
-        base_alpha = alpha0 + gamma * (week / max(1, T)) - eta * mean_width
-        alpha_t = float(np.clip(base_alpha, alpha_min, alpha_max))
+        alpha_t = compute_alpha_t(week, T, mean_width, alpha0, gamma, eta, alpha_min, alpha_max)
 
-        # 平滑alpha_t（简单周内处理）
-        alpha_t = float(np.clip(alpha_t, alpha_min, alpha_max))
-
-        # --- 向量化评估 (Vectorized Evaluation) ---
-        m = len(samples)
-        j_share = active_df["judge_share"].to_numpy()
-        j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
-        j_scores = active_df["judge_total"].to_numpy()
-        j_share_matrix = np.tile(j_share, (m, 1))
-
-        # Percent 淘汰
-        comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples
-        elim_p = np.argmin(comb_percent, axis=1)
-
-        # Rank 淘汰
-        fan_rank = np.argsort(np.argsort(-samples, axis=1), axis=1) + 1
-        j_rank_matrix = np.tile(j_rank, (m, 1))
-        comb_rank = fan_rank + j_rank_matrix
-        elim_r = np.argmax(comb_rank, axis=1)
-
-        # DAWS 淘汰
-        comb_daws = alpha_t * j_share_matrix + (1 - alpha_t) * samples
-        elim_d = np.argmin(comb_daws, axis=1)
-
-        # judge-save：bottom two + logistic（向量化）
-        bottom_two = np.argpartition(comb_rank, -2, axis=1)[:, -2:]
-        a_idx = bottom_two[:, 0]
-        b_idx = bottom_two[:, 1]
-        diff = j_scores[b_idx] - j_scores[a_idx]
-        p_elim_a = 1 / (1 + np.exp(1.8 * diff))
-        rand_u = RNG.random(m)
-        elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
-
-        # fairness（Kendall tau 近似，向量化）
-        n = len(j_rank)
-        if n < 2:
-            tau_mean = float("nan")
-        else:
-            i_idx, j_idx = np.triu_indices(n, k=1)
-            sign_j = np.sign(j_rank[i_idx] - j_rank[j_idx])
-            valid = sign_j != 0
-            if not np.any(valid):
-                tau_mean = float("nan")
-            else:
-                i_idx = i_idx[valid]
-                j_idx = j_idx[valid]
-                sign_j = sign_j[valid]
-                sign_f = np.sign(fan_rank[:, i_idx] - fan_rank[:, j_idx])
-                prod = sign_f * sign_j
-                concordant = np.sum(prod > 0, axis=1)
-                discordant = np.sum(prod < 0, axis=1)
-                denom = len(sign_j)
-                tau_vals = (concordant - discordant) / max(1, denom)
-                tau_mean = float(np.mean(tau_vals))
-        if np.isnan(tau_mean):
-            tau_mean = 0.0
-
-        # viewer agency
-        fan_lowest = np.argmin(samples, axis=1)
-        agency_p = np.mean(fan_lowest == elim_p)
-        agency_r = np.mean(fan_lowest == elim_r)
-        agency_s = np.mean(fan_lowest == elim_s)
-        agency_d = np.mean(fan_lowest == elim_d)
-
-        # stability（对percent机制噪声参考）
-        noise = RNG.normal(0, 0.02, size=samples.shape)
-        v_noise = np.maximum(samples + noise, EPSILON)
-        v_noise = v_noise / v_noise.sum(axis=1, keepdims=True)
-        elim_noise = np.argmin(ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * v_noise, axis=1)
-
-        instability_p = np.mean(elim_p != elim_noise)
-        instability_r = np.mean(elim_r != elim_noise)
-        instability_s = np.mean(elim_s != elim_noise)
-        instability_d = np.mean(elim_d != elim_noise)
-
-        for key, agency, instability in [
-            ("percent", agency_p, instability_p),
-            ("rank", agency_r, instability_r),
-            ("save", agency_s, instability_s),
-            ("daws", agency_d, instability_d),
-        ]:
-            metrics[key]["fairness_sum"] += tau_mean * m
-            metrics[key]["agency_sum"] += agency * m
-            metrics[key]["instability_sum"] += instability * m
+        eval_res = evaluate_mechanisms(samples, active_df, alpha_t, EPSILON, RNG)
+        if not eval_res:
+            continue
+        m = eval_res["count"]
+        for key in ["percent", "rank", "save", "daws"]:
+            metrics[key]["fairness_sum"] += eval_res[key]["fairness"] * m
+            metrics[key]["agency_sum"] += eval_res[key]["agency"] * m
+            metrics[key]["instability_sum"] += eval_res[key]["instability"] * m
             metrics[key]["count"] += m
 
-        flip_sum += float(np.sum(elim_p != elim_r))
+        flip_sum += float(eval_res["flip_sum"])
         flip_count += m
 
     def agg_stats(d: Dict[str, float]) -> Dict[str, float]:
@@ -737,6 +892,162 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     stats_daws = agg_stats(metrics["daws"])
     flip_rate = float(flip_sum / flip_count) if flip_count else float("nan")
     log(f"Flip rate (percent vs rank): {flip_rate:.3f}")
+
+    # =========================
+    # Fast vs Strict 校验
+    # =========================
+    fast_strict_summary: Dict[str, float] = {}
+    if FAST_STRICT_ENABLED and save_outputs:
+        log("Fast vs Strict validation...")
+        mae_list: List[float] = []
+        top1_hits = 0
+        top2_hits = 0
+        week_count = 0
+        fast_points: List[float] = []
+        strict_points: List[float] = []
+
+        metrics_fast = {
+            "percent": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+            "rank": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+            "daws": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+        }
+        metrics_strict = {
+            "percent": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+            "rank": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+            "daws": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+        }
+        flip_fast_sum = 0.0
+        flip_fast_count = 0
+        flip_strict_sum = 0.0
+        flip_strict_count = 0
+
+        for (season, week), wdf in season_week_groups:
+            active_df = wdf[wdf["active"]].copy()
+            if len(active_df) == 0:
+                continue
+            rng = np.random.default_rng(20260131 + int(season) * 1000 + int(week))
+            n = len(active_df)
+            j_share = active_df["judge_share"].to_numpy()
+            elim_idx = [i for i, flag in enumerate(active_df["is_eliminated_week"].to_numpy()) if flag]
+
+            proposals = rng.dirichlet(np.ones(n), size=FAST_STRICT_PROPS)
+            proposals = np.maximum(proposals, EPSILON)
+            proposals = proposals / proposals.sum(axis=1, keepdims=True)
+
+            mask_fast = apply_percent_mask(proposals, j_share, elim_idx, ALPHA_PERCENT, "fast")
+            mask_strict = apply_percent_mask(proposals, j_share, elim_idx, ALPHA_PERCENT, "strict")
+
+            fast_samples = proposals[mask_fast]
+            strict_samples = proposals[mask_strict]
+            if len(fast_samples) < MIN_ACCEPT:
+                fast_samples = fallback_by_violation(proposals, j_share, elim_idx, ALPHA_PERCENT, MIN_ACCEPT)
+            if len(strict_samples) < MIN_ACCEPT:
+                strict_samples = fallback_by_violation(proposals, j_share, elim_idx, ALPHA_PERCENT, MIN_ACCEPT)
+
+            if len(fast_samples) > FAST_STRICT_MAX_SAMPLES:
+                idx = rng.choice(len(fast_samples), size=FAST_STRICT_MAX_SAMPLES, replace=False)
+                fast_samples = fast_samples[idx]
+            if len(strict_samples) > FAST_STRICT_MAX_SAMPLES:
+                idx = rng.choice(len(strict_samples), size=FAST_STRICT_MAX_SAMPLES, replace=False)
+                strict_samples = strict_samples[idx]
+
+            if len(fast_samples) == 0 or len(strict_samples) == 0:
+                continue
+
+            fast_mean = fast_samples.mean(axis=0)
+            strict_mean = strict_samples.mean(axis=0)
+            mae_list.append(float(np.mean(np.abs(fast_mean - strict_mean))))
+
+            fast_points.extend(fast_mean.tolist())
+            strict_points.extend(strict_mean.tolist())
+
+            fast_bottom1 = int(np.argmin(fast_mean))
+            strict_bottom1 = int(np.argmin(strict_mean))
+            if fast_bottom1 == strict_bottom1:
+                top1_hits += 1
+            fast_bottom2 = set(np.argsort(fast_mean)[:2].tolist())
+            strict_bottom2 = set(np.argsort(strict_mean)[:2].tolist())
+            if fast_bottom2 == strict_bottom2:
+                top2_hits += 1
+            week_count += 1
+
+            mean_width = week_metrics_df[(week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)]["mean_hdi_width"].mean()
+            if np.isnan(mean_width):
+                mean_width = 0.0
+            T = active_df["week"].max()
+            alpha_t = compute_alpha_t(week, T, mean_width, alpha0, gamma, eta, alpha_min, alpha_max)
+
+            res_fast = evaluate_mechanisms(fast_samples, active_df, alpha_t, EPSILON, rng)
+            res_strict = evaluate_mechanisms(strict_samples, active_df, alpha_t, EPSILON, rng)
+
+            for key in ["percent", "rank", "daws"]:
+                metrics_fast[key]["fairness_sum"] += res_fast[key]["fairness"] * res_fast["count"]
+                metrics_fast[key]["agency_sum"] += res_fast[key]["agency"] * res_fast["count"]
+                metrics_fast[key]["instability_sum"] += res_fast[key]["instability"] * res_fast["count"]
+                metrics_fast[key]["count"] += res_fast["count"]
+
+                metrics_strict[key]["fairness_sum"] += res_strict[key]["fairness"] * res_strict["count"]
+                metrics_strict[key]["agency_sum"] += res_strict[key]["agency"] * res_strict["count"]
+                metrics_strict[key]["instability_sum"] += res_strict[key]["instability"] * res_strict["count"]
+                metrics_strict[key]["count"] += res_strict["count"]
+
+            flip_fast_sum += float(res_fast["flip_sum"])
+            flip_fast_count += res_fast["count"]
+            flip_strict_sum += float(res_strict["flip_sum"])
+            flip_strict_count += res_strict["count"]
+
+        def agg_simple(d: Dict[str, float]) -> Dict[str, float]:
+            if d["count"] == 0:
+                return {"fairness": float("nan"), "agency": float("nan"), "stability": float("nan")}
+            fairness = d["fairness_sum"] / d["count"]
+            agency = d["agency_sum"] / d["count"]
+            stability = 1.0 - (d["instability_sum"] / d["count"])
+            return {"fairness": float(fairness), "agency": float(agency), "stability": float(stability)}
+
+        fast_percent = agg_simple(metrics_fast["percent"])
+        strict_percent = agg_simple(metrics_strict["percent"])
+
+        top1_agree = (top1_hits / week_count) if week_count else 0.0
+        top2_agree = (top2_hits / week_count) if week_count else 0.0
+        mae_mean = float(np.mean(mae_list)) if mae_list else float("nan")
+        flip_fast = float(flip_fast_sum / flip_fast_count) if flip_fast_count else float("nan")
+        flip_strict = float(flip_strict_sum / flip_strict_count) if flip_strict_count else float("nan")
+
+        fast_strict_summary = {
+            "mae_mean": mae_mean,
+            "top1_agree": top1_agree,
+            "top2_agree": top2_agree,
+            "delta_fairness": abs(fast_percent["fairness"] - strict_percent["fairness"]),
+            "delta_agency": abs(fast_percent["agency"] - strict_percent["agency"]),
+            "delta_flip": abs(flip_fast - flip_strict),
+            "flip_fast": flip_fast,
+            "flip_strict": flip_strict,
+        }
+
+        # 绘制 Fast vs Strict 散点
+        if fast_points and strict_points:
+            pts = len(fast_points)
+            if pts > 4000:
+                idx = RNG.choice(pts, size=4000, replace=False)
+                x = np.array(fast_points)[idx]
+                y = np.array(strict_points)[idx]
+            else:
+                x = np.array(fast_points)
+                y = np.array(strict_points)
+            plt.figure(figsize=(4.8, 4.2))
+            plt.scatter(x, y, s=10, alpha=0.45, color=COLOR_PRIMARY)
+            lim = max(x.max(), y.max())
+            plt.plot([0, lim], [0, lim], color=COLOR_GRAY, linestyle="--", linewidth=1.0)
+            plt.xlabel("Fast mean fan share")
+            plt.ylabel("Strict mean fan share")
+            plt.title("Fast vs Strict posterior means")
+            plt.tight_layout()
+            plt.savefig(FIG_DIR / "fig_fast_vs_strict.pdf")
+            plt.close()
+
+        (OUTPUT_DIR / "fast_strict_metrics.json").write_text(
+            json.dumps(fast_strict_summary, indent=2), encoding="utf-8"
+        )
 
     # =========================
     # 混合效应模型（简化版）
@@ -852,6 +1163,38 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.savefig(FIG_DIR / "fig_conflict_map.pdf")
     plt.close()
 
+    # Conflict combo: HDI size + wrongful标注
+    combo_df = cm_df.copy()
+    combo_df["wrongful"] = False
+    for (season, week), sub in combo_df.groupby(["season", "week"], sort=False):
+        if sub.empty:
+            continue
+        min_fan = sub["fan_share_mean"].min()
+        wrongful_mask = (sub["is_eliminated_week"]) & (sub["fan_share_mean"] > min_fan + 1e-6)
+        combo_df.loc[wrongful_mask.index, "wrongful"] = wrongful_mask
+    plt.figure(figsize=(5.8, 4.2))
+    sizes = 220 * combo_df["hdi_width"].clip(0, combo_df["hdi_width"].quantile(0.95))
+    colors = combo_df["is_eliminated_week"].map(lambda x: COLOR_WARNING if x else COLOR_PRIMARY)
+    plt.scatter(combo_df["judge_share"], combo_df["fan_share_mean"], s=sizes, c=colors, alpha=0.70, edgecolors="none")
+    wrongful_pts = combo_df[combo_df["wrongful"]]
+    if not wrongful_pts.empty:
+        plt.scatter(
+            wrongful_pts["judge_share"],
+            wrongful_pts["fan_share_mean"],
+            s=120,
+            facecolors="none",
+            edgecolors=COLOR_PRIMARY_DARK,
+            linewidths=1.2,
+            label="Wrongful elimination",
+        )
+    plt.xlabel("Judge share")
+    plt.ylabel("Fan share (posterior mean)")
+    plt.title("Conflict + uncertainty + wrongful eliminations")
+    if not wrongful_pts.empty:
+        plt.legend(loc="lower right", frameon=False, fontsize=8)
+    plt.savefig(FIG_DIR / "fig_conflict_combo.pdf")
+    plt.close()
+
     # Sigma sensitivity
     sigma_vals = []
     sigma_widths = []
@@ -901,6 +1244,26 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         ["Percent", "Rank", "DAWS"],
         "fig_mechanism_radar.pdf",
     )
+
+    # Mechanism compare (bar)
+    labels = ["Fairness", "Agency", "Stability"]
+    percent_vals = [stats_percent["fairness"], stats_percent["agency"], stats_percent["stability"]]
+    rank_vals = [stats_rank["fairness"], stats_rank["agency"], stats_rank["stability"]]
+    daws_vals = [stats_daws["fairness"], stats_daws["agency"], stats_daws["stability"]]
+    x = np.arange(len(labels))
+    width = 0.24
+    plt.figure(figsize=(6.2, 3.6))
+    plt.bar(x - width, percent_vals, width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
+    plt.bar(x, rank_vals, width, label="Rank", color=COLOR_GRAY, alpha=0.85)
+    plt.bar(x + width, daws_vals, width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
+    plt.xticks(x, labels)
+    plt.ylim(0, 1)
+    plt.ylabel("Score")
+    plt.title("Mechanism comparison (numeric)")
+    plt.legend(frameon=False, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_mechanism_compare.pdf")
+    plt.close()
 
     # Ternary-like plot
     plt.figure(figsize=(4.8, 4.2))
@@ -1150,17 +1513,30 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     seasons_feasible = int((week_metrics_df.groupby("season")["accept_rate"].min() > 0).sum())
     max_hdi = float(np.nanmax(week_metrics_df["mean_hdi_width"]))
     mean_hdi = float(np.nanmean(week_metrics_df["mean_hdi_width"]))
+    median_hdi = float(np.nanmedian(week_metrics_df["mean_hdi_width"]))
+    p90_hdi = float(np.nanquantile(week_metrics_df["mean_hdi_width"], 0.90))
     daws_improve = (stats_percent["stability"] - stats_daws["stability"]) / max(1e-6, stats_percent["stability"]) * 100
 
     summary = {
         "seasons_feasible": seasons_feasible,
         "mean_hdi_width": mean_hdi,
+        "median_hdi_width": median_hdi,
+        "p90_hdi_width": p90_hdi,
         "max_hdi_width": max_hdi,
         "flip_rate": flip_rate,
         "daws_improve": daws_improve,
         "stability_daws": stats_daws["stability"],
         "fairness_daws": stats_daws["fairness"],
     }
+    if fast_strict_summary:
+        summary.update({
+            "fast_strict_mae": fast_strict_summary.get("mae_mean", float("nan")),
+            "fast_strict_top1": fast_strict_summary.get("top1_agree", float("nan")),
+            "fast_strict_top2": fast_strict_summary.get("top2_agree", float("nan")),
+            "fast_strict_delta_fairness": fast_strict_summary.get("delta_fairness", float("nan")),
+            "fast_strict_delta_agency": fast_strict_summary.get("delta_agency", float("nan")),
+            "fast_strict_delta_flip": fast_strict_summary.get("delta_flip", float("nan")),
+        })
     log(f"Summary: seasons={seasons_feasible}, max_hdi={max_hdi:.3f}, daws_improve={daws_improve:.2f}")
 
     if save_outputs:
@@ -1170,15 +1546,25 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         # LaTeX宏
         SUMMARY_TEX.write_text(
             "\n".join([
-                "% 自动生成指标",
+            "% auto-generated metrics",
                 f"\\newcommand{{\\MetricSeasonsFeasible}}{{{summary['seasons_feasible']}}}",
-                f"\\newcommand{{\\MetricMeanHDI}}{{{summary['mean_hdi_width']:.3f}}}",
-                f"\\newcommand{{\\MetricMaxHDI}}{{{summary['max_hdi_width']:.2f}}}",
-                f"\\newcommand{{\\MetricFlipRate}}{{{summary['flip_rate']*100:.1f}}}",
-                f"\\newcommand{{\\MetricDAWSImprove}}{{{summary['daws_improve']:.1f}}}",
-            ]),
-            encoding="utf-8",
-        )
+            f"\\newcommand{{\\MetricMeanHDI}}{{{summary['mean_hdi_width']:.3f}}}",
+            f"\\newcommand{{\\MetricMedianHDI}}{{{summary['median_hdi_width']:.3f}}}",
+            f"\\newcommand{{\\MetricHDIPctNinety}}{{{summary['p90_hdi_width']:.3f}}}",
+            f"\\newcommand{{\\MetricMaxHDI}}{{{summary['max_hdi_width']:.2f}}}",
+            f"\\newcommand{{\\MetricFlipRate}}{{{summary['flip_rate']*100:.1f}}}",
+            f"\\newcommand{{\\MetricDAWSImprove}}{{{summary['daws_improve']:.1f}}}",
+            f"\\newcommand{{\\MetricDAWSStability}}{{{summary['stability_daws']:.3f}}}",
+            f"\\newcommand{{\\MetricDAWSFairness}}{{{summary['fairness_daws']:.3f}}}",
+            f"\\newcommand{{\\MetricFastMAE}}{{{summary.get('fast_strict_mae', float('nan')):.4f}}}",
+            f"\\newcommand{{\\MetricFastTopOne}}{{{summary.get('fast_strict_top1', float('nan'))*100:.1f}}}",
+            f"\\newcommand{{\\MetricFastTopTwo}}{{{summary.get('fast_strict_top2', float('nan'))*100:.1f}}}",
+            f"\\newcommand{{\\MetricFastDeltaFlip}}{{{summary.get('fast_strict_delta_flip', float('nan'))*100:.2f}}}",
+            f"\\newcommand{{\\MetricFastDeltaFair}}{{{summary.get('fast_strict_delta_fairness', float('nan')):.3f}}}",
+            f"\\newcommand{{\\MetricFastDeltaAgency}}{{{summary.get('fast_strict_delta_agency', float('nan')):.3f}}}",
+        ]),
+        encoding="utf-8",
+    )
 
     elapsed = time.perf_counter() - t_start
     log(f"Runtime: {elapsed:.2f}s")

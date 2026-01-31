@@ -88,9 +88,13 @@
 发现 & 估计 \\
 \midrule
 可行赛季数 & \MetricSeasonsFeasible\ / 34 \\
-最大 HDI 宽度（周层面） & \MetricMaxHDI \\
 平均 HDI 宽度（周层面） & \MetricMeanHDI \\
+中位 HDI 宽度（周层面） & \MetricMedianHDI \\
+P90 HDI 宽度（周层面） & \MetricHDIPctNinety \\
+最大 HDI 宽度（周层面） & \MetricMaxHDI \\
 Rank vs Percent 翻转率 & \MetricFlipRate\% \\
+DAWS 稳定性 & \MetricDAWSStability \\
+DAWS 公平性（Kendall $\tau$） & \MetricDAWSFairness \\
 DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \bottomrule
 \end{tabular}
@@ -296,12 +300,43 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 \takeaway{对免疫、双淘汰等特殊周进行规则适配。}
 免疫选手从淘汰不等式中移除；双淘汰同时对两名最低者施加约束。
 
+\subsection{工程近似与严格校验}
+\takeaway{工程实现采用快速近似采样，并通过严格约束校验保证结论稳定。}
+理论模型采用 LP/MILP 形式化，但实际工程管线采用快速 Dirichlet 采样与简化可行性筛选以保证速度。为此，我们使用严格可行性（完整淘汰约束）对同一批候选样本进行再筛选，并比较后验摘要。
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+校验指标 & 数值 \\
+\midrule
+均值 fan share MAE & \MetricFastMAE \\
+Top-1 一致率（fast vs strict） & \MetricFastTopOne\% \\
+Top-2 一致率（fast vs strict） & \MetricFastTopTwo\% \\
+公平性变动（percent） & \MetricFastDeltaFair \\
+主权变动（percent） & \MetricFastDeltaAgency \\
+Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+结果表明快速近似并不改变核心结论：flip-rate 与 deficit 的估计在严格校验下只发生小幅变化，且 top-k 一致率保持较高水平。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\linewidth]{figures/fig_fast_vs_strict.pdf}
+\caption{Fast 与 Strict 后验均值对比，偏离程度有限。}
+\end{figure}
+
 \subsection{可识别性与可行质量}
 \takeaway{可行质量由 acceptance rate 与 HDI 宽度量化。}
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_uncertainty_heatmap.pdf}
 \caption{不确定性集中于少数周，即使整体可行。}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\linewidth]{figures/fig_hdi_distribution.pdf}
+\caption{周层面 HDI 宽度分布，极端周占比有限。}
 \end{figure}
 
 \subsection{平滑后验}
@@ -325,6 +360,12 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 \caption{规则切换概率在 S28 附近上升。}
 \end{figure}
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_rule_switch_ci.pdf}
+\caption{规则切换概率的置信带（bootstrap）。}
+\end{figure}
+
 \keyoutput{多面体边界、Slack、后验样本、规则切换概率。}
 
 \section{结果A：粉丝票估计与不确定性}
@@ -333,6 +374,12 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_conflict_map.pdf}
 \caption{淘汰并非总与粉丝最低支持对齐。}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_conflict_combo.pdf}
+\caption{冲突图叠加不确定性（点大小）与错误淘汰标注（外圈）。}
 \end{figure}
 
 \begin{figure}[H]
@@ -366,6 +413,12 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \centering
 \includegraphics[width=0.85\linewidth]{figures/fig_ternary_daws.pdf}
 \caption{DAWS 位于权衡前沿。}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.86\linewidth]{figures/fig_mechanism_compare.pdf}
+\caption{三种机制在公平性、主权、稳定性上的数值对比。}
 \end{figure}
 
 \keyoutput{机制指标、翻转率与 Pareto 权衡。}
@@ -434,7 +487,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{figure}
 
 \subsection{规模对比实验}
-我们在多进程设置下比较不同采样规模，记录运行时间、误差（均值 HDI 宽度）、稳定性（DAWS）与理论匹配度（Kendall $\tau$）。结果显示误差随规模提升而趋于平缓，稳定性与匹配度基本保持一致。
+我们在多进程设置下比较不同采样规模，记录运行时间、误差（均值 HDI 宽度）、稳定性（DAWS）与理论匹配度（Kendall $\tau$）。结果显示误差随规模提升而趋于平缓，图中虚线标注了拐点与最终规模选择。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_scale_benchmark.pdf}

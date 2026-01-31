@@ -1,9 +1,17 @@
 {
   "seasons_feasible": 34,
   "mean_hdi_width": 0.4106223358963786,
+  "median_hdi_width": 0.36614340901427,
+  "p90_hdi_width": 0.5961489803844834,
   "max_hdi_width": 0.9509680388858954,
   "flip_rate": 0.25137654615212274,
-  "daws_improve": 2.0156423490123796,
-  "stability_daws": 0.7487423673982591,
-  "fairness_daws": 0.050210908635164926
+  "daws_improve": 2.01852234609743,
+  "stability_daws": 0.7488494048194094,
+  "fairness_daws": 0.050210908635164926,
+  "fast_strict_mae": 0.004522754464847319,
+  "fast_strict_top1": 0.7671641791044777,
+  "fast_strict_top2": 0.8,
+  "fast_strict_delta_fairness": 0.00013546527965438426,
+  "fast_strict_delta_agency": 0.0033896081592219574,
+  "fast_strict_delta_flip": 0.0034911610031888307
 }
