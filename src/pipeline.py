@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 DWTS 2026 MCM Problem C: 数据建模与可视化主流程
 中文注释：本脚本完成数据读取、投票可行集采样、机制评估与图表输出。
@@ -36,12 +36,13 @@ LOG_PATH = OUTPUT_DIR / "run.log"
 
 EPSILON = 0.001  # 中文注释：投票占比下限
 ALPHA_PERCENT = 0.5  # 中文注释：百分比规则权重
-N_PROPOSALS = 500  # 中文注释：每周Dirichlet提案数量
+N_PROPOSALS = 250  # 中文注释：每周Dirichlet提案数量
 MIN_ACCEPT = 40  # 中文注释：最少保留的可行样本
 SIGMA_LIST = [0.5, 1.0, 1.5, 2.0]
 RHO_SWITCH = 0.10  # 中文注释：规则切换先验概率
 COMPUTE_BOUNDS = False  # 中文注释：是否计算LP边界（耗时）
 USE_MIXED_MODEL = False  # 中文注释：是否使用混合效应模型
+MAX_SAMPLES_PER_WEEK = 120  # 中文注释：每周用于指标的最大样本数
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
@@ -219,7 +220,7 @@ def lp_bounds_and_slack(week_df, alpha, epsilon, compute_bounds):
 # 机制评估与指标
 # =========================
 
-def compute_rank_feasible_rate(week_df: pd.DataFrame, n_perm: int = 300) -> float:
+def compute_rank_feasible_rate(week_df: pd.DataFrame, n_perm: int = 80) -> float:
     """中文注释：蒙特卡洛估计排名规则可行率。"""
     active_df = week_df[week_df["active"]].copy()
     n = len(active_df)
@@ -303,7 +304,7 @@ def run_pipeline() -> None:
     acc_cache: Dict[Tuple[int, int], float] = {}
     slack_cache: Dict[Tuple[int, int], float] = {}
 
-    print("[中文] 采样可行集并计算不确定性...")
+    log("[中文] 采样可行集并计算不确定性...")
     for (season, week), wdf in season_week_groups:
         active_df = wdf[wdf["active"]].copy()
         if len(active_df) == 0:
@@ -324,6 +325,16 @@ def run_pipeline() -> None:
         # 计算HDI
         if len(samples) == 0:
             continue
+        if len(samples) > MAX_SAMPLES_PER_WEEK:
+            idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
+            samples = samples[idx]
+        if len(samples) > MAX_SAMPLES_PER_WEEK:
+            idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
+            samples = samples[idx]
+        # 中文注释：抽样降采样，控制计算量
+        if len(samples) > MAX_SAMPLES_PER_WEEK:
+            idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
+            samples = samples[idx]
         lower = np.quantile(samples, 0.025, axis=0)
         upper = np.quantile(samples, 0.975, axis=0)
         mean = samples.mean(axis=0)
@@ -365,7 +376,7 @@ def run_pipeline() -> None:
 
     # 错误淘汰概率
     wrongful_heat = np.full_like(heat, np.nan)
-    print("[中文] 计算错误淘汰概率...")
+    log("[中文] 计算错误淘汰概率...")
     for (season, week), wdf in season_week_groups:
         active_df = wdf[wdf["active"]].copy()
         if len(active_df) == 0:
@@ -386,7 +397,7 @@ def run_pipeline() -> None:
         wrongful_heat[int(season) - 1, int(week) - 1] = wrongful
 
     # 规则切换推断
-    print("[中文] 推断规则切换概率...")
+    log("[中文] 推断规则切换概率...")
     evidence_records = []
     for season in sorted(long_df["season"].unique()):
         season_weeks = week_metrics_df[week_metrics_df["season"] == season]
@@ -423,7 +434,7 @@ def run_pipeline() -> None:
     evidence_df["prob_rank"] = probs
 
     # 机制评估
-    print("[中文] 评估机制指标...")
+    log("[中文] 评估机制指标...")
     mechanism_stats = {"percent": [], "rank": [], "save": [], "daws": []}
     flip_list = []
 
@@ -514,7 +525,7 @@ def run_pipeline() -> None:
     # =========================
     # 混合效应模型（简化版）
     # =========================
-    print("[中文] 拟合混合效应模型...")
+    log("[中文] 拟合混合效应模型...")
     model_df = posterior_df.copy()
     model_df = model_df.dropna(subset=["fan_share_mean", "judge_share"])  # 防止空值
     model_df["age"] = model_df["celebrity_age_during_season"].astype(float)
@@ -568,7 +579,7 @@ def run_pipeline() -> None:
     # =========================
     # 预测模型（XGBoost替代）
     # =========================
-    print("[中文] 训练预测模型（GBDT替代）...")
+    log("[中文] 训练预测模型（GBDT替代）...")
     pred_df = posterior_df.copy()
     pred_df["eliminated"] = pred_df["is_eliminated_week"].astype(int)
     pred_df["age"] = pred_df["celebrity_age_during_season"].astype(float)
@@ -593,7 +604,7 @@ def run_pipeline() -> None:
     # =========================
     # 图表输出
     # =========================
-    print("[中文] 输出图表...")
+    log("[中文] 输出图表...")
 
     # Uncertainty heatmap
     plt.figure(figsize=(6.4, 3.8))
@@ -775,9 +786,150 @@ def run_pipeline() -> None:
     plt.close()
 
     # =========================
+    # 争议案例 Ridgeline（近似）
+    # =========================
+    log("[中文] 生成争议案例密度图...")
+    controversy_names = ["Jerry Rice", "Billy Ray Cyrus", "Bristol Palin", "Bobby Bones"]
+    fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.2), sharex=False)
+    axes = axes.flatten()
+    for ax, name in zip(axes, controversy_names):
+        sub = posterior_df[posterior_df["celebrity_name"] == name].copy()
+        if sub.empty:
+            ax.text(0.5, 0.5, f"{name}\\nNot Found", ha="center", va="center")
+            ax.axis("off")
+            continue
+        weeks = sorted(sub["week"].unique())
+        max_x = max(0.25, sub["fan_share_mean"].max() + 0.15)
+        x = np.linspace(0, max_x, 200)
+        for i, w in enumerate(weeks):
+            row = sub[sub["week"] == w].iloc[0]
+            mu = row["fan_share_mean"]
+            width = max(row["hdi_width"], 1e-3)
+            sigma = width / (2 * 1.96)
+            density = np.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * math.sqrt(2 * math.pi))
+            density = density / density.max() * 0.8
+            offset = i * 0.6
+            ax.fill_between(x, offset, offset + density, color=COLOR_PRIMARY, alpha=0.25)
+            ax.plot(x, offset + density, color=COLOR_PRIMARY, linewidth=1.0)
+            if bool(row["is_eliminated_week"]):
+                ax.scatter([mu], [offset + 0.35], color=COLOR_WARNING, s=12)
+        ax.set_title(name, fontsize=9)
+        ax.set_yticks([])
+        ax.set_xlabel("Fan share")
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_controversy_ridgeline.pdf")
+    plt.close(fig)
+
+    # =========================
+    # Alluvial-like flow（决赛阵容）
+    # =========================
+    log("[中文] 生成决赛流向图...")
+    def get_finalists(season_df: pd.DataFrame) -> List[str]:
+        top = season_df.sort_values("placement").head(3)
+        return top["celebrity_name"].tolist()
+
+    def predict_finalists(season: int, mechanism: str) -> List[str]:
+        # 中文注释：用最终周的均值 fan share 与 judge share 近似预测
+        season_long = long_df[long_df["season"] == season]
+        last_week = int(season_long["week"].max())
+        wk = posterior_df[(posterior_df["season"] == season) & (posterior_df["week"] == last_week)]
+        if wk.empty:
+            return []
+        j_share = wk["judge_share"].to_numpy()
+        v_share = wk["fan_share_mean"].to_numpy()
+        if mechanism == "percent":
+            combined = 0.5 * j_share + 0.5 * v_share
+        elif mechanism == "rank":
+            j_rank = pd.Series(j_share).rank(ascending=False, method="average").to_numpy()
+            f_rank = (-v_share).argsort().argsort() + 1
+            combined = -(j_rank + f_rank)
+        else:
+            combined = 0.6 * j_share + 0.4 * v_share
+        idx = np.argsort(-combined)[:3]
+        return wk.iloc[idx]["celebrity_name"].tolist()
+
+    def draw_alluvial(ax, counts: Dict[str, int], title: str) -> None:
+        total = sum(counts.values())
+        if total == 0:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center")
+            ax.axis("off")
+            return
+        # 左右柱高度
+        af = counts["ff"] + counts["fn"]
+        anf = counts["nf"] + counts["nn"]
+        pf = counts["ff"] + counts["nf"]
+        pnf = counts["fn"] + counts["nn"]
+
+        # 左侧区间
+        y0 = 0.0
+        af_low, af_high = y0, y0 + af / total
+        anf_low, anf_high = af_high, 1.0
+
+        # 右侧区间
+        y1 = 0.0
+        pf_low, pf_high = y1, y1 + pf / total
+        pnf_low, pnf_high = pf_high, 1.0
+
+        # 绘制柱子
+        ax.add_patch(plt.Rectangle((0.0, af_low), 0.05, af_high - af_low, color=COLOR_PRIMARY))
+        ax.add_patch(plt.Rectangle((0.0, anf_low), 0.05, anf_high - anf_low, color=COLOR_GRAY))
+        ax.add_patch(plt.Rectangle((0.95, pf_low), 0.05, pf_high - pf_low, color=COLOR_PRIMARY))
+        ax.add_patch(plt.Rectangle((0.95, pnf_low), 0.05, pnf_high - pnf_low, color=COLOR_GRAY))
+
+        # 流带函数
+        def ribbon(y_left_low, y_left_high, y_right_low, y_right_high, color):
+            xs = [0.05, 0.4, 0.6, 0.95]
+            ys1 = [y_left_low, y_left_low, y_right_low, y_right_low]
+            ys2 = [y_left_high, y_left_high, y_right_high, y_right_high]
+            ax.fill_between(xs, ys1, ys2, color=color, alpha=0.35)
+
+        # 分配流
+        ff_low, ff_high = af_low, af_low + counts["ff"] / total
+        fn_low, fn_high = ff_high, af_high
+        pf_ff_low, pf_ff_high = pf_low, pf_low + counts["ff"] / total
+        pf_nf_low, pf_nf_high = pf_ff_high, pf_high
+        pnf_fn_low, pnf_fn_high = pnf_low, pnf_low + counts["fn"] / total
+        pnf_nn_low, pnf_nn_high = pnf_fn_high, pnf_high
+
+        ribbon(ff_low, ff_high, pf_ff_low, pf_ff_high, COLOR_PRIMARY)
+        ribbon(fn_low, fn_high, pnf_fn_low, pnf_fn_high, COLOR_WARNING)
+        ribbon(anf_low, anf_low + counts["nf"] / total, pf_nf_low, pf_nf_high, COLOR_ACCENT)
+        ribbon(anf_low + counts["nf"] / total, anf_high, pnf_nn_low, pnf_nn_high, COLOR_LIGHT_GRAY)
+
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis("off")
+        ax.set_title(title, fontsize=9)
+
+    mechanisms = ["percent", "rank", "daws"]
+    fig, axes = plt.subplots(1, 3, figsize=(9.0, 3.0))
+    for ax, mech in zip(axes, mechanisms):
+        counts = {"ff": 0, "fn": 0, "nf": 0, "nn": 0}
+        for season in sorted(df["season"].unique()):
+            season_df = df[df["season"] == season].copy()
+            actual_finalists = set(get_finalists(season_df))
+            predicted = set(predict_finalists(season, mech))
+            for name in season_df["celebrity_name"].unique():
+                actual = name in actual_finalists
+                pred = name in predicted
+                if actual and pred:
+                    counts["ff"] += 1
+                elif actual and (not pred):
+                    counts["fn"] += 1
+                elif (not actual) and pred:
+                    counts["nf"] += 1
+                else:
+                    counts["nn"] += 1
+        title = {"percent": "Percent", "rank": "Rank", "daws": "DAWS"}[mech]
+        draw_alluvial(ax, counts, title)
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_alluvial_finalists.pdf")
+    plt.close(fig)
+
+    # =========================
     # 输出指标与中间结果
     # =========================
-    print("[中文] 写出汇总指标...")
+    log("[中文] 写出汇总指标...")
     seasons_feasible = int((week_metrics_df.groupby("season")["accept_rate"].min() > 0).sum())
     max_hdi = float(np.nanmax(week_metrics_df["mean_hdi_width"]))
     daws_improve = (stats_percent["stability"] - stats_daws["stability"]) / max(1e-6, stats_percent["stability"]) * 100
@@ -804,7 +956,7 @@ def run_pipeline() -> None:
         encoding="utf-8",
     )
 
-    print("[中文] 完成。")
+    log("[中文] 完成。")
 
 
 if __name__ == "__main__":
