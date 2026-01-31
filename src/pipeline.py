@@ -1396,10 +1396,19 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.close()
 
     # =========================
-    # 争议案例 Ridgeline（近似）
+    # 争议案例 Ridgeline（自动筛选“冤案”）
     # =========================
-    log("Rendering controversy ridgeline chart...")
-    controversy_names = ["Jerry Rice", "Billy Ray Cyrus", "Bristol Palin", "Bobby Bones"]
+    log("Rendering smart controversy ridgeline chart...")
+    top_controversy = (
+        posterior_df[posterior_df["is_eliminated_week"]]
+        .sort_values("fan_share_mean", ascending=False)
+        .drop_duplicates(subset=["celebrity_name"])
+        .head(4)
+    )
+    controversy_names = top_controversy["celebrity_name"].tolist()
+    if not controversy_names:
+        controversy_names = ["Jerry Rice", "Billy Ray Cyrus", "Bristol Palin", "Bobby Bones"]
+
     fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.2), sharex=False)
     axes = axes.flatten()
     for ax, name in zip(axes, controversy_names):
@@ -1408,24 +1417,34 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             ax.text(0.5, 0.5, f"{name}\\nNot Found", ha="center", va="center")
             ax.axis("off")
             continue
+
         weeks = sorted(sub["week"].unique())
-        max_x = max(0.25, sub["fan_share_mean"].max() + 0.15)
+        max_x = max(0.30, sub["fan_share_mean"].max() + 0.10)
         x = np.linspace(0, max_x, 200)
+        elim_week = sub[sub["is_eliminated_week"]]["week"].min()
+
         for i, w in enumerate(weeks):
             row = sub[sub["week"] == w].iloc[0]
             mu = row["fan_share_mean"]
             width = max(row["hdi_width"], 1e-3)
-            sigma = width / (2 * 1.96)
-            density = np.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * math.sqrt(2 * math.pi))
-            density = density / density.max() * 0.8
-            offset = i * 0.6
-            ax.fill_between(x, offset, offset + density, color=COLOR_PRIMARY, alpha=0.25)
-            ax.plot(x, offset + density, color=COLOR_PRIMARY, linewidth=1.0)
-            if bool(row["is_eliminated_week"]):
-                ax.scatter([mu], [offset + 0.35], color=COLOR_WARNING, s=12)
-        ax.set_title(name, fontsize=9)
+            sigma = width / 3.0
+            density = np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+
+            is_elim = (w == elim_week)
+            color = COLOR_WARNING if is_elim else COLOR_PRIMARY
+            alpha = 0.60 if is_elim else 0.20
+            offset = i * 0.5
+            ax.fill_between(x, offset, offset + density * 0.8, color=color, alpha=alpha)
+            ax.plot(x, offset + density * 0.8, color=color, linewidth=1.0 if is_elim else 0.6)
+            if is_elim:
+                ax.text(max_x * 0.95, offset, "ELIMINATED", color=COLOR_WARNING, fontsize=8, ha="right", fontweight="bold")
+
+        season_id = int(sub.iloc[0]["season"])
+        ax.set_title(f"{name} (Season {season_id})", fontsize=9)
         ax.set_yticks([])
-        ax.set_xlabel("Fan share")
+        if ax in (axes[2], axes[3]):
+            ax.set_xlabel("Estimated fan share")
+    plt.suptitle("Democratic deficit: high fan support yet eliminated", fontsize=11, y=0.98)
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_controversy_ridgeline.pdf")
     plt.close(fig)
