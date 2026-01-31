@@ -35,6 +35,7 @@ OUTPUT_DIR = Path("outputs")
 FIG_DIR = Path("paper/figures")
 SUMMARY_TEX = Path("paper/summary_metrics.tex")
 LOG_PATH = OUTPUT_DIR / "run.log"
+BENCHMARK_CSV = OUTPUT_DIR / "scale_benchmark.csv"
 
 EPSILON = 0.001  # 投票占比下限
 ALPHA_PERCENT = 0.5  # 百分比规则权重
@@ -228,6 +229,66 @@ def lp_bounds_and_slack(week_df, alpha, epsilon, compute_bounds):
     return {}, 0.001
 
 
+def parse_scales(env_val: str | None) -> List[int]:
+    """解析环境变量中的采样规模列表。"""
+    if not env_val:
+        return []
+    parts = [p.strip() for p in env_val.split(",") if p.strip()]
+    scales = []
+    for p in parts:
+        try:
+            scales.append(int(p))
+        except ValueError:
+            continue
+    return [s for s in scales if s > 0]
+
+
+def update_benchmark_csv(records: List[Dict[str, float]]) -> pd.DataFrame:
+    """追加/更新规模实验记录，并按规模排序。"""
+    new_df = pd.DataFrame(records)
+    if BENCHMARK_CSV.exists():
+        old_df = pd.read_csv(BENCHMARK_CSV)
+        merged = pd.concat([old_df, new_df], ignore_index=True)
+        merged = merged.drop_duplicates(subset=["n_proposals"], keep="last")
+    else:
+        merged = new_df
+    merged = merged.sort_values("n_proposals").reset_index(drop=True)
+    merged.to_csv(BENCHMARK_CSV, index=False, encoding="utf-8")
+    return merged
+
+
+def plot_scale_benchmark(df: pd.DataFrame) -> None:
+    """绘制规模对比图（时间、误差、稳定性、匹配度）。"""
+    if df.empty:
+        return
+    fig, axes = plt.subplots(2, 2, figsize=(7.6, 5.6))
+    x = df["n_proposals"]
+
+    axes[0, 0].plot(x, df["runtime_sec"], marker="o", color=COLOR_PRIMARY)
+    axes[0, 0].set_title("Runtime vs Scale")
+    axes[0, 0].set_xlabel("N_PROPOSALS")
+    axes[0, 0].set_ylabel("Seconds")
+
+    axes[0, 1].plot(x, df["mean_hdi"], marker="o", color=COLOR_ACCENT)
+    axes[0, 1].set_title("Error (Mean HDI) vs Scale")
+    axes[0, 1].set_xlabel("N_PROPOSALS")
+    axes[0, 1].set_ylabel("Mean HDI")
+
+    axes[1, 0].plot(x, df["stability_daws"], marker="o", color=COLOR_PRIMARY_DARK)
+    axes[1, 0].set_title("Stability (DAWS) vs Scale")
+    axes[1, 0].set_xlabel("N_PROPOSALS")
+    axes[1, 0].set_ylabel("Stability")
+
+    axes[1, 1].plot(x, df["fairness_daws"], marker="o", color=COLOR_GRAY)
+    axes[1, 1].set_title("Theory Fit (Kendall tau) vs Scale")
+    axes[1, 1].set_xlabel("N_PROPOSALS")
+    axes[1, 1].set_ylabel("Tau")
+
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_scale_benchmark.pdf")
+    plt.close(fig)
+
+
 def process_season_samples(
     task: Tuple[int, pd.DataFrame, float, float, int, bool, int],
 ) -> Dict[str, object]:
@@ -360,18 +421,19 @@ def mechanism_judge_save(v: np.ndarray, week_df: pd.DataFrame, beta: float) -> L
 # 主流程
 # =========================
 
-def run_pipeline() -> None:
+def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, save_outputs: bool = True) -> Dict[str, float]:
     ensure_dirs()
     set_plot_style()
     LOG_PATH.write_text("", encoding="utf-8")
     t_start = time.perf_counter()
+    n_props = int(n_props or N_PROPOSALS)
 
     log("Load data...")
     df = load_data()
     long_df = build_long_df(df)
     log(f"Raw rows: {len(df)}, Long rows: {len(long_df)}")
     log(f"Seasons: {long_df['season'].nunique()}, Weeks: {long_df['week'].nunique()}")
-    log(f"Config: N_PROPOSALS={N_PROPOSALS}, MULTIPROC={USE_MULTIPROCESSING}, WORKERS={PARALLEL_WORKERS}")
+    log(f"Config: N_PROPOSALS={n_props}, MULTIPROC={USE_MULTIPROCESSING}, WORKERS={PARALLEL_WORKERS}")
 
     # 计算judge share
     long_df["judge_share"] = long_df.groupby(["season", "week"])['judge_total'].transform(
@@ -405,7 +467,7 @@ def run_pipeline() -> None:
         for season, sdf in long_df.groupby("season", sort=True):
             season_df = sdf[cols].copy()
             seed = 20260131 + int(season) * 1000
-            tasks.append((int(season), season_df, ALPHA_PERCENT, EPSILON, N_PROPOSALS, COMPUTE_BOUNDS, seed))
+            tasks.append((int(season), season_df, ALPHA_PERCENT, EPSILON, n_props, COMPUTE_BOUNDS, seed))
 
         log(f"Parallel sampling by season... tasks={len(tasks)}")
         with ProcessPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
@@ -427,7 +489,7 @@ def run_pipeline() -> None:
                 acc_rate = acc_cache[key]
                 slack = slack_cache[key]
             else:
-                samples, acc_rate = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, N_PROPOSALS)
+                samples, acc_rate = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
                 _, slack = lp_bounds_and_slack(wdf, ALPHA_PERCENT, EPSILON, COMPUTE_BOUNDS)
                 samples_cache[key] = samples
                 acc_cache[key] = acc_rate
@@ -490,7 +552,7 @@ def run_pipeline() -> None:
         key = (int(season), int(week))
         samples = samples_cache.get(key)
         if samples is None or len(samples) == 0:
-            samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, N_PROPOSALS)
+            samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
             samples_cache[key] = samples
         if len(samples) == 0:
             continue
@@ -562,7 +624,7 @@ def run_pipeline() -> None:
         key = (int(season), int(week))
         samples = samples_cache.get(key)
         if samples is None or len(samples) == 0:
-            samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, N_PROPOSALS)
+            samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
             samples_cache[key] = samples
         if len(samples) == 0:
             continue
@@ -627,6 +689,8 @@ def run_pipeline() -> None:
                 denom = len(sign_j)
                 tau_vals = (concordant - discordant) / max(1, denom)
                 tau_mean = float(np.mean(tau_vals))
+        if np.isnan(tau_mean):
+            tau_mean = 0.0
 
         # viewer agency
         fan_lowest = np.argmin(samples, axis=1)
@@ -1085,35 +1149,70 @@ def run_pipeline() -> None:
     log("Writing summary metrics...")
     seasons_feasible = int((week_metrics_df.groupby("season")["accept_rate"].min() > 0).sum())
     max_hdi = float(np.nanmax(week_metrics_df["mean_hdi_width"]))
+    mean_hdi = float(np.nanmean(week_metrics_df["mean_hdi_width"]))
     daws_improve = (stats_percent["stability"] - stats_daws["stability"]) / max(1e-6, stats_percent["stability"]) * 100
 
     summary = {
         "seasons_feasible": seasons_feasible,
+        "mean_hdi_width": mean_hdi,
         "max_hdi_width": max_hdi,
         "flip_rate": flip_rate,
         "daws_improve": daws_improve,
+        "stability_daws": stats_daws["stability"],
+        "fairness_daws": stats_daws["fairness"],
     }
     log(f"Summary: seasons={seasons_feasible}, max_hdi={max_hdi:.3f}, daws_improve={daws_improve:.2f}")
 
-    (OUTPUT_DIR / "summary_metrics.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    pd.DataFrame([summary]).to_csv(OUTPUT_DIR / "summary_metrics.csv", index=False, encoding="utf-8")
+    if save_outputs:
+        (OUTPUT_DIR / "summary_metrics.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        pd.DataFrame([summary]).to_csv(OUTPUT_DIR / "summary_metrics.csv", index=False, encoding="utf-8")
 
-    # LaTeX宏
-    SUMMARY_TEX.write_text(
-        "\n".join([
-            "% 自动生成指标",
-            f"\\newcommand{{\\MetricSeasonsFeasible}}{{{summary['seasons_feasible']}}}",
-            f"\\newcommand{{\\MetricMaxHDI}}{{{summary['max_hdi_width']:.2f}}}",
-            f"\\newcommand{{\\MetricFlipRate}}{{{summary['flip_rate']*100:.1f}}}",
-            f"\\newcommand{{\\MetricDAWSImprove}}{{{summary['daws_improve']:.1f}}}",
-        ]),
-        encoding="utf-8",
-    )
+        # LaTeX宏
+        SUMMARY_TEX.write_text(
+            "\n".join([
+                "% 自动生成指标",
+                f"\\newcommand{{\\MetricSeasonsFeasible}}{{{summary['seasons_feasible']}}}",
+                f"\\newcommand{{\\MetricMeanHDI}}{{{summary['mean_hdi_width']:.3f}}}",
+                f"\\newcommand{{\\MetricMaxHDI}}{{{summary['max_hdi_width']:.2f}}}",
+                f"\\newcommand{{\\MetricFlipRate}}{{{summary['flip_rate']*100:.1f}}}",
+                f"\\newcommand{{\\MetricDAWSImprove}}{{{summary['daws_improve']:.1f}}}",
+            ]),
+            encoding="utf-8",
+        )
 
     elapsed = time.perf_counter() - t_start
     log(f"Runtime: {elapsed:.2f}s")
     log("Done.")
 
+    summary["runtime_sec"] = float(elapsed)
+    summary["n_proposals"] = int(n_props)
+    if record_benchmark:
+        bench_df = update_benchmark_csv([{
+            "n_proposals": summary["n_proposals"],
+            "runtime_sec": summary["runtime_sec"],
+            "mean_hdi": summary["mean_hdi_width"],
+            "max_hdi": summary["max_hdi_width"],
+            "stability_daws": summary["stability_daws"],
+            "fairness_daws": summary["fairness_daws"],
+            "flip_rate": summary["flip_rate"],
+            "daws_improve": summary["daws_improve"],
+        }])
+        if save_outputs:
+            plot_scale_benchmark(bench_df)
+
+    return summary
+
 
 if __name__ == "__main__":
-    run_pipeline()
+    scales = parse_scales(os.getenv("MCM_SCALES"))
+    if scales:
+        results = []
+        max_scale = max(scales)
+        for scale in scales:
+            log(f"Running scale experiment: {scale}")
+            summary = run_pipeline(n_props=scale, record_benchmark=True, save_outputs=(scale == max_scale))
+            results.append(summary)
+        if (FIG_DIR / "fig_scale_benchmark.pdf").exists():
+            log("Scale benchmark figure updated.")
+    else:
+        run_pipeline(n_props=N_PROPOSALS, record_benchmark=True, save_outputs=True)

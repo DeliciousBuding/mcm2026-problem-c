@@ -89,6 +89,7 @@
 \midrule
 可行赛季数 & \MetricSeasonsFeasible\ / 34 \\
 最大 HDI 宽度（周层面） & \MetricMaxHDI \\
+平均 HDI 宽度（周层面） & \MetricMeanHDI \\
 Rank vs Percent 翻转率 & \MetricFlipRate\% \\
 DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \bottomrule
@@ -430,6 +431,14 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \centering
 \includegraphics[width=0.80\linewidth]{figures/fig_ppc_summary.pdf}
 \caption{后验预测检验结果。}
+\end{figure}
+
+\subsection{规模对比实验}
+我们在多进程设置下比较不同采样规模，记录运行时间、误差（均值 HDI 宽度）、稳定性（DAWS）与理论匹配度（Kendall $\tau$）。结果显示误差随规模提升而趋于平缓，稳定性与匹配度基本保持一致。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_scale_benchmark.pdf}
+\caption{不同采样规模下的时间、误差、稳定性与匹配度对比。}
 \end{figure}
 
 \keyoutput{敏感性曲线与后验预测覆盖率。}

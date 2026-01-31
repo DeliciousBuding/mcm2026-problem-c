@@ -88,6 +88,7 @@ Finding & Estimate \\
 \midrule
 Seasons feasible under audit & \MetricSeasonsFeasible\ / 34 \\
 Max HDI width (week-level) & \MetricMaxHDI \\
+Mean HDI width (week-level) & \MetricMeanHDI \\
 Rank vs percent flip rate & \MetricFlipRate\% \\
 DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \bottomrule
@@ -457,6 +458,14 @@ We vary $\sigma$ (smoothness), $\epsilon$ (vote floor), and $\rho$ (switch proba
 \centering
 \includegraphics[width=0.80\linewidth]{figures/fig_ppc_summary.pdf}
 \caption{Model reproduces eliminations while preserving uncertainty.}
+\end{figure}
+
+\subsection{Scale Benchmark}
+We benchmark sampling scale with a multi-process setup and record runtime, error (mean HDI width), stability (DAWS), and theory-fit (Kendall $\tau$). The curves show diminishing returns in uncertainty reduction beyond mid-scale settings, while stability and fit remain consistent.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_scale_benchmark.pdf}
+\caption{Scale benchmark across $N_{\text{proposals}}$ with runtime, error, stability, and theory-fit.}
 \end{figure}
 
 \keyoutput{Sensitivity curves and posterior predictive validity metrics.}
