@@ -78,7 +78,7 @@
 \vspace{0.5ex}
 \begin{center}
 \begin{minipage}{0.94\linewidth}
-\takeaway{We reconstruct the entire feasible fan-vote polytope consistent with weekly eliminations, then propagate uncertainty through counterfactual rule evaluations and a DAWS mechanism.}
+\takeaway{We characterize and sample from the feasible fan-vote region consistent with weekly eliminations, then propagate uncertainty through counterfactual rule evaluations and a DAWS mechanism.}
 \end{minipage}
 \end{center}
 
@@ -166,7 +166,7 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \begin{enumerate}[leftmargin=2em]
 \item \textbf{Identifiability varies sharply.} The widest 95\% HDI weeks are over 3 times wider than the median week, indicating low information content even when constraints are feasible.
 \item \textbf{Mechanism differences are material.} Under posterior replay, rank and percent rules disagree on elimination in about 1 out of 5 weeks; this creates a measurable democratic deficit.
-\item \textbf{Drivers differ for judges vs fans.} Mixed-effects models show pro-dancer influence is stronger for fans, while judges emphasize technical features.
+\item \textbf{Drivers differ for judges vs fans.} Mixed-effects models show pro-dancer influence is stronger for fans, while judges are less sensitive to pro-identity heterogeneity.
 \end{enumerate}
 
 \textbf{Recommendations.}
@@ -177,14 +177,16 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \end{enumerate}
 
 % 机制对比雷达图
-\vspace{-0.5em}
-\begin{figure}[H]
+\noindent\begin{minipage}[t]{0.49\linewidth}
 \centering
-\includegraphics[width=0.70\linewidth]{figures/fig_mechanism_radar.pdf}
-\caption{DAWS achieves a better trade-off among fairness, agency, and stability.}
-\end{figure}
-\vspace{-0.5em}
-
+\includegraphics[width=\linewidth]{figures/fig_mechanism_radar.pdf}
+\captionof{figure}{Mechanism trade-offs (radar).}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/fig_mechanism_compare.pdf}
+\captionof{figure}{Mechanism comparison (numeric).}
+\end{minipage}
 \clearpage
 \tableofcontents
 \clearpage
@@ -329,7 +331,7 @@ Flip-rate shift (percent vs rank) & \MetricFastDeltaFlip\% \\
 The fast approximation preserves all headline conclusions: flip-rate and deficit estimates shift by less than a few percent under strict audit, while top-k agreement remains high.
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.78\linewidth]{figures/fig_fast_vs_strict.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_fast_vs_strict.pdf}
 \caption{Fast vs strict posterior means; deviations are small and concentrated near the diagonal.}
 \end{figure}
 \subsection{Identifiability and Feasible Mass}
@@ -339,13 +341,13 @@ We use (i) acceptance rate of Dirichlet proposals; (ii) posterior entropy $H_t$;
 % 不确定性热力图
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_uncertainty_heatmap.pdf}
+\includegraphics[width=0.96\linewidth]{figures/fig_uncertainty_heatmap.pdf}
 \caption{Uncertainty concentrates in a small set of weeks, despite universal feasibility.}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.78\linewidth]{figures/fig_hdi_distribution.pdf}
+\includegraphics[width=0.88\linewidth]{figures/fig_hdi_distribution.pdf}
 \caption{Distribution of weekly HDI widths; extreme weeks are rare.}
 \end{figure}
 
@@ -357,26 +359,26 @@ We define a truncated posterior with temporal smoothness:
 % 平滑参数敏感性
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_sigma_sensitivity.pdf}
+\includegraphics[width=0.95\linewidth]{figures/fig_sigma_sensitivity.pdf}
 \caption{Key conclusions are stable across a range of $\sigma$ values.}
 \end{figure}
 
 \subsection{Rule-Switch Inference}
-\takeaway{We infer the likely season of rule change with a change-point model.}
-For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})}$ and $\mathcal E_s^{(\text{rank+save})}$ and infer latent rule $z_s$ with a switching penalty $\rho$.
+\takeaway{We adopt Season 28 as the switch per the problem statement and provide an exploratory change-point check.}
+For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})}$ and $\mathcal E_s^{(\text{rank+save})}$ and infer latent rule $z_s$ with a switching penalty $\rho$ as a robustness check.
 \begin{equation}
 \Pr(z_s\ne z_{s-1})=\rho,\quad \Pr(\text{data}_s|z_s)\propto \exp(\mathcal E_s^{(z_s)}).
 \end{equation}
 % 规则切换后验
 \begin{figure}[H]
 \centering
-\begin{subfigure}[t]{0.48\linewidth}
+\begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_rule_switch.pdf}
 \caption{Point estimate.}
 \end{subfigure}
 \hfill
-\begin{subfigure}[t]{0.48\linewidth}
+\begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_rule_switch_ci.pdf}
 \caption{Bootstrap band.}
@@ -391,27 +393,27 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 % 冲突散点图
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_conflict_map.pdf}
+\includegraphics[width=0.95\linewidth]{figures/fig_conflict_map.pdf}
 \caption{Eliminations are not always aligned with minimum fan support.}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_conflict_combo.pdf}
+\includegraphics[width=0.95\linewidth]{figures/fig_conflict_combo.pdf}
 \caption{Conflict map augmented with uncertainty (size) and wrongful eliminations (rings).}
 \end{figure}
 
 % 争议人物周序分布
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_controversy_ridgeline.pdf}
+\includegraphics[width=0.96\linewidth]{figures/fig_controversy_ridgeline.pdf}
 \caption{Posterior density bands highlight uncertainty in high-profile cases.}
 \end{figure}
 
 % 错误淘汰概率热力图
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_wrongful_heatmap.pdf}
+\includegraphics[width=0.96\linewidth]{figures/fig_wrongful_heatmap.pdf}
 \caption{Certain weeks exhibit persistent democratic tension.}
 \end{figure}
 
@@ -428,7 +430,7 @@ We compute fairness, agency, stability, and deficit for percent, rank, rank+save
 % 机制差异的结果迁移图（占位保留）
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.98\linewidth]{figures/fig_alluvial_finalists.pdf}
+\includegraphics[width=\linewidth]{figures/fig_alluvial_finalists.pdf}
 \caption{Mechanism choice can alter finalists and champions with nontrivial probability.}
 \vspace{0.4em}
 \begin{subfigure}[t]{0.49\linewidth}
@@ -457,14 +459,14 @@ We fit mixed-effects models on logit shares:
 % 职业舞伴效应森林图
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_pro_forest.pdf}
+\includegraphics[width=0.95\linewidth]{figures/fig_pro_forest.pdf}
 \caption{Certain pros influence fans more strongly than judges.}
 \end{figure}
 
 % 特征效应对比散点
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.82\linewidth]{figures/fig_feature_scatter.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_feature_scatter.pdf}
 \caption{Points far from the diagonal indicate differing impacts.}
 \end{figure}
 
@@ -474,7 +476,7 @@ We train a gradient-boosted decision tree (GBDT) classifier to predict eliminati
 % 预测性能曲线
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.80\linewidth]{figures/fig_auc_forward.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_auc_forward.pdf}
 \caption{Predictive performance is stable and supports the selected covariates.}
 \end{figure}
 
@@ -506,7 +508,7 @@ and report $\hat\beta$ with confidence intervals.
 % Judge-save 决策曲线
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.82\linewidth]{figures/fig_judgesave_curve.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
 \caption{Judges prefer higher score within the bottom two; $\hat\beta$ quantifies sharpness.}
 \end{figure}
 
@@ -519,7 +521,7 @@ We vary $\sigma$ (smoothness), $\epsilon$ (vote floor), and $\rho$ (switch proba
 % 后验预测检验
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.80\linewidth]{figures/fig_ppc_summary.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_ppc_summary.pdf}
 \caption{Model reproduces eliminations while preserving uncertainty.}
 \end{figure}
 
@@ -527,7 +529,7 @@ We vary $\sigma$ (smoothness), $\epsilon$ (vote floor), and $\rho$ (switch proba
 We benchmark sampling scale with a multi-process setup and record runtime, error (mean HDI width), stability (DAWS), and theory-fit (Kendall $\tau$). The curves show diminishing returns in uncertainty reduction beyond mid-scale settings; the elbow (dashed line) marks our final scale choice.
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.98\linewidth]{figures/fig_scale_benchmark.pdf}
+\includegraphics[width=\linewidth]{figures/fig_scale_benchmark.pdf}
 \caption{Scale benchmark across $N_{\text{proposals}}$ with runtime, error, stability, and theory-fit.}
 \end{figure}
 
@@ -545,6 +547,9 @@ We provide a complete audit of feasible fan votes, show that rank rules create m
 \clearpage
 \section*{References}
 \addcontentsline{toc}{section}{References}
+\ifdefined\bibname
+  \renewcommand{\bibname}{}
+\fi
 \renewcommand{\refname}{}
 \begin{thebibliography}{9}
 \bibitem{comap2026} COMAP. 2026 MCM/ICM Problem C: Dancing with the Stars (DWTS). Contest Problem Statement.

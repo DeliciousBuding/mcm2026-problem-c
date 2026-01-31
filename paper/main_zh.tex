@@ -79,7 +79,7 @@
 \vspace{0.5ex}
 \begin{center}
 \begin{minipage}{0.94\linewidth}
-\takeaway{我们重建与周淘汰一致的粉丝票可行多面体，并将不确定性传播到反事实规则评估与 DAWS 机制中。}
+\takeaway{我们刻画并采样与周淘汰一致的粉丝票可行区域，并将不确定性传播到反事实规则评估与 DAWS 机制中。}
 \end{minipage}
 \end{center}
 
@@ -177,14 +177,16 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \item 用审计仪表盘提前预警高不确定周。
 \end{enumerate}
 
-\vspace{-0.5em}
-\begin{figure}[H]
+\noindent\begin{minipage}[t]{0.49\linewidth}
 \centering
-\includegraphics[width=0.70\linewidth]{figures/fig_mechanism_radar.pdf}
-\caption{DAWS 在公平、主权、稳定之间实现更优折中。}
-\end{figure}
-\vspace{-0.5em}
-
+\includegraphics[width=\linewidth]{figures/fig_mechanism_radar.pdf}
+\captionof{figure}{??????????}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{figures/fig_mechanism_compare.pdf}
+\captionof{figure}{?????????}
+\end{minipage}
 \clearpage
 \tableofcontents
 \clearpage
@@ -328,7 +330,7 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 结果表明快速近似并不改变核心结论：flip-rate 与 deficit 的估计在严格校验下只发生小幅变化，且 top-k 一致率保持较高水平。
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.78\linewidth]{figures/fig_fast_vs_strict.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_fast_vs_strict.pdf}
 \caption{Fast 与 Strict 后验均值对比，偏离程度有限。}
 \end{figure}
 
@@ -336,13 +338,13 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \takeaway{可行质量由 acceptance rate 与 HDI 宽度量化。}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_uncertainty_heatmap.pdf}
+\includegraphics[width=0.96\linewidth]{figures/fig_uncertainty_heatmap.pdf}
 \caption{不确定性集中于少数周，即使整体可行。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.78\linewidth]{figures/fig_hdi_distribution.pdf}
+\includegraphics[width=0.88\linewidth]{figures/fig_hdi_distribution.pdf}
 \caption{周层面 HDI 宽度分布，极端周占比有限。}
 \end{figure}
 
@@ -352,24 +354,24 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \end{equation}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_sigma_sensitivity.pdf}
+\includegraphics[width=0.95\linewidth]{figures/fig_sigma_sensitivity.pdf}
 \caption{结论对 $\sigma$ 较为稳健。}
 \end{figure}
 
 \subsection{规则切换推断}
-\takeaway{通过 change-point/HMM 推断规则切换赛季。}
+\takeaway{按题目假设采用第 28 季为切换点，并提供探索性变点检验。}
 \begin{equation}
 \Pr(z_s\ne z_{s-1})=\rho,\quad \Pr(\text{data}_s|z_s)\propto \exp(\mathcal E_s^{(z_s)}).
 \end{equation}
 \begin{figure}[H]
 \centering
-\begin{subfigure}[t]{0.48\linewidth}
+\begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_rule_switch.pdf}
 \caption{点估计。}
 \end{subfigure}
 \hfill
-\begin{subfigure}[t]{0.48\linewidth}
+\begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_rule_switch_ci.pdf}
 \caption{置信带。}
@@ -383,25 +385,25 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \takeaway{评委与粉丝的冲突可被量化并可视化。}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_conflict_map.pdf}
+\includegraphics[width=0.95\linewidth]{figures/fig_conflict_map.pdf}
 \caption{淘汰并非总与粉丝最低支持对齐。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_conflict_combo.pdf}
+\includegraphics[width=0.95\linewidth]{figures/fig_conflict_combo.pdf}
 \caption{冲突图叠加不确定性（点大小）与错误淘汰标注（外圈）。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_controversy_ridgeline.pdf}
+\includegraphics[width=0.96\linewidth]{figures/fig_controversy_ridgeline.pdf}
 \caption{争议人物周序后验密度显示显著不确定性。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.92\linewidth]{figures/fig_wrongful_heatmap.pdf}
+\includegraphics[width=0.96\linewidth]{figures/fig_wrongful_heatmap.pdf}
 \caption{部分周存在持续的民主张力。}
 \end{figure}
 
@@ -416,7 +418,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.98\linewidth]{figures/fig_alluvial_finalists.pdf}
+\includegraphics[width=\linewidth]{figures/fig_alluvial_finalists.pdf}
 \caption{????????????????????}
 \vspace{0.4em}
 \begin{subfigure}[t]{0.49\linewidth}
@@ -443,13 +445,13 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.90\linewidth]{figures/fig_pro_forest.pdf}
+\includegraphics[width=0.95\linewidth]{figures/fig_pro_forest.pdf}
 \caption{职业舞伴效应：粉丝与评委影响存在差异。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.82\linewidth]{figures/fig_feature_scatter.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_feature_scatter.pdf}
 \caption{特征系数偏离对角线表明影响机制不同。}
 \end{figure}
 
@@ -457,7 +459,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \takeaway{预测模型仅作为协变量有效性的鲁棒性检验。}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.80\linewidth]{figures/fig_auc_forward.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_auc_forward.pdf}
 \caption{分季 AUC 表现稳定。}
 \end{figure}
 
@@ -483,7 +485,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{equation}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.82\linewidth]{figures/fig_judgesave_curve.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
 \caption{Judge-save 决策曲线。}
 \end{figure}
 
@@ -493,7 +495,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \takeaway{关键结论对 $\sigma$、$\epsilon$ 与规则切换先验具有稳健性。}
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.80\linewidth]{figures/fig_ppc_summary.pdf}
+\includegraphics[width=0.90\linewidth]{figures/fig_ppc_summary.pdf}
 \caption{后验预测检验结果。}
 \end{figure}
 
@@ -501,7 +503,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 我们在多进程设置下比较不同采样规模，记录运行时间、误差（均值 HDI 宽度）、稳定性（DAWS）与理论匹配度（Kendall $\tau$）。结果显示误差随规模提升而趋于平缓，图中虚线标注了拐点与最终规模选择。
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.98\linewidth]{figures/fig_scale_benchmark.pdf}
+\includegraphics[width=\linewidth]{figures/fig_scale_benchmark.pdf}
 \caption{不同采样规模下的时间、误差、稳定性与匹配度对比。}
 \end{figure}
 
@@ -519,6 +521,9 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \clearpage
 \section*{参考文献}
 \addcontentsline{toc}{section}{参考文献}
+\ifdefined\bibname
+  \renewcommand{\bibname}{}
+\fi
 \renewcommand{\refname}{}
 \begin{thebibliography}{9}
 \bibitem{comap2026} COMAP. 2026 MCM/ICM Problem C: Dancing with the Stars (DWTS). Contest Problem Statement.
