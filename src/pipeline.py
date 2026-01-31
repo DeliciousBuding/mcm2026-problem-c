@@ -439,8 +439,14 @@ def run_pipeline() -> None:
 
     # 机制评估
     log("Evaluating mechanism metrics...")
-    mechanism_stats = {"percent": [], "rank": [], "save": [], "daws": []}
-    flip_list = []
+    metrics = {
+        "percent": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+        "rank": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+        "save": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+        "daws": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+    }
+    flip_sum = 0.0
+    flip_count = 0
 
     # DAWS参数
     alpha0, gamma, eta = 0.55, 0.15, 0.8
@@ -467,64 +473,84 @@ def run_pipeline() -> None:
         # 平滑alpha_t（简单周内处理）
         alpha_t = float(np.clip(alpha_t, alpha_min, alpha_max))
 
-        for v in samples:
-            # percent
-            elim_p = mechanism_elimination(v, wdf, ALPHA_PERCENT)
-            # rank
-            elim_r = mechanism_rank_elimination(v, wdf)
-            # judge save
-            elim_s = mechanism_judge_save(v, wdf, beta=1.8)
-            # DAWS
-            elim_d = mechanism_elimination(v, wdf, alpha_t)
+        m = len(samples)
+        j_share = active_df["judge_share"].to_numpy()
+        j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+        j_scores = active_df["judge_total"].to_numpy()
 
-            # fairness
-            j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
-            f_rank = (-v).argsort().argsort() + 1
-            tau = kendalltau(j_rank, f_rank).correlation
+        # 各机制淘汰（向量化）
+        comb_percent = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * samples
+        elim_p = np.argmin(comb_percent, axis=1)
 
-            # viewer agency
-            fan_lowest = int(np.argmin(v))
+        fan_rank = np.argsort(np.argsort(-samples, axis=1), axis=1) + 1
+        comb_rank = fan_rank + j_rank
+        elim_r = np.argmax(comb_rank, axis=1)
 
-            # stability
-            noise = RNG.normal(0, 0.02, size=len(v))
-            v_noise = np.maximum(v + noise, EPSILON)
-            v_noise = v_noise / v_noise.sum()
-            elim_noise = mechanism_elimination(v_noise, wdf, ALPHA_PERCENT)
+        comb_daws = alpha_t * j_share + (1 - alpha_t) * samples
+        elim_d = np.argmin(comb_daws, axis=1)
 
-            mechanism_stats["percent"].append({
-                "fairness": tau,
-                "agency": 1.0 if fan_lowest in elim_p else 0.0,
-                "stability": 0.0 if elim_p == elim_noise else 1.0,
-            })
-            mechanism_stats["rank"].append({
-                "fairness": tau,
-                "agency": 1.0 if fan_lowest in elim_r else 0.0,
-                "stability": 0.0 if elim_r == elim_noise else 1.0,
-            })
-            mechanism_stats["save"].append({
-                "fairness": tau,
-                "agency": 1.0 if fan_lowest in elim_s else 0.0,
-                "stability": 0.0 if elim_s == elim_noise else 1.0,
-            })
-            mechanism_stats["daws"].append({
-                "fairness": tau,
-                "agency": 1.0 if fan_lowest in elim_d else 0.0,
-                "stability": 0.0 if elim_d == elim_noise else 1.0,
-            })
+        # judge-save：bottom two + logistic
+        bottom_two = np.argpartition(comb_rank, -2, axis=1)[:, -2:]
+        a_idx = bottom_two[:, 0]
+        b_idx = bottom_two[:, 1]
+        diff = j_scores[b_idx] - j_scores[a_idx]
+        p_elim_a = 1 / (1 + np.exp(1.8 * diff))
+        rand_u = RNG.random(m)
+        elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
 
-            flip_list.append(1.0 if elim_p != elim_r else 0.0)
+        # fairness（Kendall tau）
+        taus = []
+        for fr in fan_rank:
+            taus.append(kendalltau(j_rank, fr).correlation)
+        if len(taus) == 0 or np.all(np.isnan(taus)):
+            tau_mean = float("nan")
+        else:
+            tau_mean = float(np.nanmean(taus))
 
-    def agg_stats(lst: List[Dict[str, float]]) -> Dict[str, float]:
-        return {
-            "fairness": float(np.nanmean([x["fairness"] for x in lst])),
-            "agency": float(np.nanmean([x["agency"] for x in lst])),
-            "stability": 1.0 - float(np.nanmean([x["stability"] for x in lst])),
-        }
+        # viewer agency
+        fan_lowest = np.argmin(samples, axis=1)
+        agency_p = np.mean(fan_lowest == elim_p)
+        agency_r = np.mean(fan_lowest == elim_r)
+        agency_s = np.mean(fan_lowest == elim_s)
+        agency_d = np.mean(fan_lowest == elim_d)
 
-    stats_percent = agg_stats(mechanism_stats["percent"])
-    stats_rank = agg_stats(mechanism_stats["rank"])
-    stats_daws = agg_stats(mechanism_stats["daws"])
-    flip_rate = float(np.mean(flip_list)) if flip_list else float("nan")
+        # stability（对percent机制噪声参考）
+        noise = RNG.normal(0, 0.02, size=samples.shape)
+        v_noise = np.maximum(samples + noise, EPSILON)
+        v_noise = v_noise / v_noise.sum(axis=1, keepdims=True)
+        elim_noise = np.argmin(ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_noise, axis=1)
+
+        instability_p = np.mean(elim_p != elim_noise)
+        instability_r = np.mean(elim_r != elim_noise)
+        instability_s = np.mean(elim_s != elim_noise)
+        instability_d = np.mean(elim_d != elim_noise)
+
+        for key, agency, instability in [
+            ("percent", agency_p, instability_p),
+            ("rank", agency_r, instability_r),
+            ("save", agency_s, instability_s),
+            ("daws", agency_d, instability_d),
+        ]:
+            metrics[key]["fairness_sum"] += tau_mean * m
+            metrics[key]["agency_sum"] += agency * m
+            metrics[key]["instability_sum"] += instability * m
+            metrics[key]["count"] += m
+
+        flip_sum += float(np.sum(elim_p != elim_r))
+        flip_count += m
+
+    def agg_stats(d: Dict[str, float]) -> Dict[str, float]:
+        if d["count"] == 0:
+            return {"fairness": float("nan"), "agency": float("nan"), "stability": float("nan")}
+        fairness = d["fairness_sum"] / d["count"]
+        agency = d["agency_sum"] / d["count"]
+        stability = 1.0 - (d["instability_sum"] / d["count"])
+        return {"fairness": float(fairness), "agency": float(agency), "stability": float(stability)}
+
+    stats_percent = agg_stats(metrics["percent"])
+    stats_rank = agg_stats(metrics["rank"])
+    stats_daws = agg_stats(metrics["daws"])
+    flip_rate = float(flip_sum / flip_count) if flip_count else float("nan")
     log(f"Flip rate (percent vs rank): {flip_rate:.3f}")
 
     # =========================
