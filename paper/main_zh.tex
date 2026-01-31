@@ -1,0 +1,457 @@
+﻿% !TEX program = xelatex
+\documentclass[12pt]{article}
+\usepackage[UTF8]{ctex}
+\usepackage{geometry}
+\geometry{left=1in,right=0.75in,top=1in,bottom=1in}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Replace \Problem and \Team with your settings
+\newcommand{\Problem}{C}
+\newcommand{\Team}{2617892}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\usepackage{newtxtext}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{newtxmath}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{float}
+\usepackage{tikz}
+\usepackage{tcolorbox}
+\usepackage{hyperref}
+\hypersetup{hidelinks}
+
+\lhead{Team \Team}
+\rhead{}
+\cfoot{}
+\setlength{\headheight}{14.5pt}
+
+\newtheorem{theorem}{定理}
+\newtheorem{corollary}[theorem]{推论}
+\newtheorem{lemma}[theorem]{引理}
+\newtheorem{definition}{定义}
+\newtheorem{proposition}{命题}
+
+\newtcolorbox{takeawaybox}{colback=gray!10,colframe=black!25,boxrule=0.4pt,arc=2pt,left=6pt,right=6pt,top=4pt,bottom=4pt}
+\newcommand{\takeaway}[1]{\begin{takeawaybox}\textbf{结论要点.} #1\end{takeawaybox}}
+\newcommand{\keyoutput}[1]{\begin{takeawaybox}\textbf{关键输出.} #1\end{takeawaybox}}
+
+\newcommand{\placeholderfig}[2]{%
+\fbox{\begin{minipage}[c][#1][c]{0.92\linewidth}\centering #2\end{minipage}}%
+}
+
+% 自动生成的指标宏
+\input{summary_metrics.tex}
+
+\begin{document}
+\graphicspath{{.}}
+\DeclareGraphicsExtensions{.pdf,.jpg,.tif,.png}
+\hypersetup{pageanchor=false}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Summary Sheet (Page 1)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\thispagestyle{empty}
+\vspace*{-16ex}
+\centerline{\begin{tabular}{*3{c}}
+\parbox[t]{0.3\linewidth}{\begin{center}\textbf{题目选择}\\ \Large \Problem\end{center}}
+& \parbox[t]{0.3\linewidth}{\begin{center}\textbf{2026\\ MCM/ICM\\ 摘要页}\end{center}}
+& \parbox[t]{0.3\linewidth}{\begin{center}\textbf{队伍控制号}\\ \Large \Team\end{center}}\\
+\hline
+\end{tabular}}
+
+\vspace{1ex}
+\begin{center}
+{\Large \textbf{DWTS 投票机制的审计与设计}}\\[0.5ex]
+\textit{我们将 DWTS 视为“审计 + 机制设计”问题：先反推可行粉丝票，再量化不确定性，并提出更平衡的规则。}
+\end{center}
+
+\vspace{0.5ex}
+\begin{minipage}[t]{0.58\linewidth}
+\takeaway{我们重建与周淘汰一致的粉丝票可行多面体，并将不确定性传播到反事实规则评估与 DAWS 机制中。}
+
+\vspace{0.5ex}
+\textbf{核心结果（节选）.}
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+发现 & 估计 \\
+\midrule
+可行赛季数 & \MetricSeasonsFeasible\ / 34 \\
+最大 HDI 宽度（周层面） & \MetricMaxHDI \\
+Rank vs Percent 翻转率 & \MetricFlipRate\% \\
+DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.5ex}
+\textbf{方法流程.}
+\begin{center}
+\begin{tikzpicture}[node distance=1.2cm,>=latex,scale=0.95]
+\tikzstyle{block}=[rectangle,draw=black!50,rounded corners,minimum height=0.8cm,minimum width=3.2cm,fill=gray!10]
+\node[block] (a) {多面体反演（LP/MILP）};
+\node[block,below of=a] (b) {最大熵 + 平滑后验};
+\node[block,below of=b] (c) {机制审计 + DAWS 设计};
+\draw[->] (a) -- (b);
+\draw[->] (b) -- (c);
+\end{tikzpicture}
+\end{center}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.38\linewidth}
+\textbf{冲突图（摘要主图）.}
+\begin{center}
+\begin{tikzpicture}[x=2.6cm,y=2.6cm]
+\draw[->] (0,0) -- (1.05,0) node[anchor=west] {Judge share};
+\draw[->] (0,0) -- (0,1.05) node[anchor=south] {Fan share};
+\draw[gray!40] (0,0) grid[step=0.25] (1,1);
+\fill[black] (0.15,0.80) circle (1.6pt);
+\fill[black] (0.25,0.35) circle (1.6pt);
+\fill[black] (0.60,0.55) circle (1.6pt);
+\fill[black] (0.70,0.20) circle (1.6pt);
+\fill[red!70] (0.35,0.15) circle (2.2pt);
+\fill[red!70] (0.80,0.30) circle (2.2pt);
+\node[red!70,anchor=west,scale=0.7] at (0.82,0.30) {elim};
+\end{tikzpicture}
+\end{center}
+\textbf{建议.} 采用随周变化的 DAWS 权重 $\alpha_t$，并公开 bottom-two 与 judge-save 判定标准。
+\end{minipage}
+
+\clearpage
+\hypersetup{pageanchor=true}
+\pagestyle{fancy}
+\rhead{Page \thepage\ }
+\pagenumbering{arabic}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Memo
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section*{备忘录：致节目制作方与评委}
+\addcontentsline{toc}{section}{备忘录}
+\textbf{收件人：} DWTS 制作方与评委\\
+\textbf{发件人：} Team \Team\\
+\textbf{日期：} 2026年1月31日\\
+\textbf{主题：} 粉丝投票可行性审计与规则改进建议
+
+\takeaway{我们审计全部赛季并量化粉丝票不确定性。证据显示，Rank 聚合存在信息压缩，并加大民主赤字。}
+
+\textbf{执行摘要（6 行以内）.}
+\begin{itemize}[leftmargin=2em]
+\item 规则整体与淘汰结果一致（$S^*\approx 0$），但不确定性在不同周差异明显。
+\item Rank 聚合是对粉丝支持度的有损压缩，造成显著翻转概率。
+\item DAWS 在公平、主权与稳定三指标上实现更好折中。
+\end{itemize}
+
+\textbf{主要发现.}
+\begin{enumerate}[leftmargin=2em]
+\item \textbf{可识别性差异显著。} 最宽 95\% HDI 周度区间超过中位周 3 倍。
+\item \textbf{机制差异具有实质影响。} Rank 与 Percent 在约 1/5 周出现淘汰翻转。
+\item \textbf{影响因素对评委与粉丝不同。} 混合效应模型显示职业舞伴对粉丝影响更强。
+\end{enumerate}
+
+\textbf{建议.}
+\begin{enumerate}[leftmargin=2em]
+\item 公布 DAWS 方案并基于不确定性指数 $U_t$ 调整 $\alpha_t$。
+\item 公开 judge-save 规则与投票记录，提高透明度。
+\item 用审计仪表盘提前预警高不确定周。
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_mechanism_radar.pdf}
+\caption{DAWS 在公平、主权、稳定之间实现更优折中。}
+\end{figure}
+
+\clearpage
+\tableofcontents
+\clearpage
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Main Report
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{引言与路线图}
+\takeaway{我们将 DWTS 视为审计与机制设计问题：反推粉丝票、量化不确定性、提出更优规则。}
+我们观测到每周评委分数与淘汰结果，但粉丝投票是潜变量。目标不是猜测唯一投票值，而是给出与规则一致的完整可行集合，并将不确定性传播到反事实机制评估与规则设计中。
+
+\textbf{贡献.} (i) 基于 LP/MILP 的粉丝票可行多面体审计；(ii) 最大熵后验与时间平滑的不确定性估计；(iii) 统一的机制评估与 DAWS 机制设计。
+
+\subsection{任务-章节映射}
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}p{0.08\linewidth}p{0.52\linewidth}p{0.22\linewidth}@{}}
+\toprule
+任务 & 我们做了什么 & 主要产出 \\
+\midrule
+1 & 多面体反演与后验估计 & Fan HDI 区间 \\
+2 & Percent 与 Rank 反事实对比 & 翻转率与赤字 \\
+3 & Judges vs Fans 双模型 & 影响差异 \\
+4 & 公平/主权/稳定指标 & 指标矩阵 \\
+5 & DAWS 设计与 Pareto & 推荐机制 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\keyoutput{建立从淘汰结果到可行粉丝票集合与机制指标的完整流程。}
+
+\section{数据与规则}
+\takeaway{以 share 统一不同周规模，编码 percent、rank 与 judge-save 规则。}
+使用提供的赛季-周数据。$C_t$ 表示第 $t$ 周仍在比赛的选手集合，$E_t$ 表示被淘汰选手。
+
+\subsection{百分比规则}
+评委占比：
+\begin{equation}
+ j_{i,t}=\frac{J_{i,t}}{\sum_{k\in C_t}J_{k,t}}.
+\end{equation}
+粉丝占比 $v_{i,t}$ 位于 simplex 并设置下限 $\epsilon$：
+\begin{equation}
+ \mathcal{S}_n=\{\mathbf v\in\mathbb{R}^n: \sum_i v_i=1,\ v_i\ge \epsilon\}.
+\end{equation}
+组合得分：
+\begin{equation}
+ c_{i,t}(\alpha)=\alpha j_{i,t}+(1-\alpha)v_{i,t}.
+\end{equation}
+淘汰约束：
+\begin{equation}
+ c_{E_t,t}(\alpha)\le c_{i,t}(\alpha),\quad \forall i\ne E_t.
+\end{equation}
+
+\subsection{排名规则与 Judge Save}
+粉丝排名 $r^F_i$ 用二元变量 $x_{ik}$ 表示：
+\begin{equation}
+\sum_k x_{ik}=1,\quad \sum_i x_{ik}=1,\quad r^F_i=\sum_k kx_{ik}.
+\end{equation}
+排名与 share 关系：
+\begin{equation}
+ r^F_i<r^F_j \Rightarrow v_i\ge v_j+\Delta.
+\end{equation}
+组合排名与淘汰：
+\begin{equation}
+ R_i=r^J_i+r^F_i,\quad R_{E_t}\ge R_i\ \forall i\ne E_t.
+\end{equation}
+Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的软选择确定淘汰者。
+
+\keyoutput{Percent、Rank 与 Judge-save 规则均可写入统一约束框架。}
+
+\section{假设与指标}
+\takeaway{使用公平、主权与稳定指标评价机制并定义民主赤字。}
+假设：(i) 粉丝占比非负且有下限；(ii) 规则被遵守，除非 slack 提示张力；(iii) 周与周之间平滑。
+
+指标（高者更好，除非说明）：
+\begin{itemize}[leftmargin=2em]
+\item 公平性：评委与粉丝排序的 Kendall $\tau$。
+\item 观众主权：粉丝最低者被淘汰的概率。
+\item 稳定性：小扰动下淘汰翻转率。
+\item 民主赤字：$D=\Pr(E^{(\text{rank})}_t\ne E^{(\text{percent})}_t)$。
+\end{itemize}
+\keyoutput{统一指标接口用于机制对比。}
+
+\section{模型A：多面体反演审计}
+\subsection{观测与潜变量}
+\takeaway{可行粉丝票集合是 simplex 上的多面体，而非超矩形。}
+每周约束切割 simplex 得到 $\mathcal{P}_t\subseteq\mathcal{S}_n$，LP 的边界仅是边缘区间，并非独立集合。
+
+\subsection{Percent 规则 LP 审计}
+\begin{algorithm}[H]
+\caption{Percent 周度多面体审计}
+\begin{algorithmic}[1]
+\Require $C_t, J_{i,t}, E_t, \alpha, \epsilon$
+\Ensure 边界 $(L_i,U_i)$，Slack $S_t^*$，采样接口
+\State 构造 simplex 与淘汰不等式
+\For{each $i\in C_t$}
+  \State $L_i\leftarrow \min_{\mathbf v\in\mathcal{P}_t} v_i$
+  \State $U_i\leftarrow \max_{\mathbf v\in\mathcal{P}_t} v_i$
+\EndFor
+\State 放松约束并求最小 slack $S_t^*$
+\State 输出边界与采样结果
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Rank 规则 MILP 与有序 share}
+\begin{algorithm}[H]
+\caption{Rank 可行序列到 share 采样}
+\begin{algorithmic}[1]
+\Require Rank 规则周数据
+\Ensure fan share 后验样本
+\State MILP 求可行粉丝排名排列 $\pi$
+\For{each $\pi$}
+  \State 构造 $\mathcal{P}_t(\pi)$ 并采样
+\EndFor
+\State 汇总样本
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{规则适配周}
+\takeaway{对免疫、双淘汰等特殊周进行规则适配。}
+免疫选手从淘汰不等式中移除；双淘汰同时对两名最低者施加约束。
+
+\subsection{可识别性与可行质量}
+\takeaway{可行质量由 acceptance rate 与 HDI 宽度量化。}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_uncertainty_heatmap.pdf}
+\caption{不确定性集中于少数周，即使整体可行。}
+\end{figure}
+
+\subsection{平滑后验}
+\begin{equation}
+ p(\mathbf v_{1:T}|\text{rules,data})\propto \Big[\prod_t \mathbf{1}(\mathbf v_t\in\mathcal{P}_t)\Big]\cdot\prod_{t=2}^T \exp\Big(-\frac{\|\mathbf v_t-\mathbf v_{t-1}\|^2}{2\sigma^2}\Big).
+\end{equation}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_sigma_sensitivity.pdf}
+\caption{结论对 $\sigma$ 较为稳健。}
+\end{figure}
+
+\subsection{规则切换推断}
+\takeaway{通过 change-point/HMM 推断规则切换赛季。}
+\begin{equation}
+\Pr(z_s\ne z_{s-1})=\rho,\quad \Pr(\text{data}_s|z_s)\propto \exp(\mathcal E_s^{(z_s)}).
+\end{equation}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_rule_switch.pdf}
+\caption{规则切换概率在 S28 附近上升。}
+\end{figure}
+
+\keyoutput{多面体边界、Slack、后验样本、规则切换概率。}
+
+\section{结果A：粉丝票估计与不确定性}
+\takeaway{评委与粉丝的冲突可被量化并可视化。}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_conflict_map.pdf}
+\caption{淘汰并非总与粉丝最低支持对齐。}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_controversy_ridgeline.pdf}
+\caption{争议人物周序后验密度显示显著不确定性。}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_wrongful_heatmap.pdf}
+\caption{部分周存在持续的民主张力。}
+\end{figure}
+
+\keyoutput{粉丝占比后验、HDI 与错误淘汰概率。}
+
+\section{模型B：机制反事实评估}
+\takeaway{Rank 聚合是有损压缩，翻转率显著。}
+定义机制 $M$ 与淘汰算子：
+\begin{equation}
+E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
+\end{equation}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_alluvial_finalists.pdf}
+\caption{机制选择会改变决赛阵容与冠军的概率分配。}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_ternary_daws.pdf}
+\caption{DAWS 位于权衡前沿。}
+\end{figure}
+
+\keyoutput{机制指标、翻转率与 Pareto 权衡。}
+
+\section{模型C：成功因素（Judges vs Fans）}
+\takeaway{评委与粉丝对因素的响应存在差异。}
+\begin{align}
+\text{logit}(j_{i,t}) &= \mathbf x_i^\top\beta^{(J)} + u_{\text{pro}(i)}^{(J)} + u_{\text{season}(s)}^{(J)} + \epsilon_{i,t},\\
+\text{logit}(v_{i,t}) &= \mathbf x_i^\top\beta^{(F)} + u_{\text{pro}(i)}^{(F)} + u_{\text{season}(s)}^{(F)} + \epsilon'_{i,t}.
+\end{align}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_pro_forest.pdf}
+\caption{职业舞伴效应：粉丝与评委影响存在差异。}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{figures/fig_feature_scatter.pdf}
+\caption{特征系数偏离对角线表明影响机制不同。}
+\end{figure}
+
+\subsection{预测补充：GBDT}
+\takeaway{预测模型仅作为协变量有效性的鲁棒性检验。}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.80\linewidth]{figures/fig_auc_forward.pdf}
+\caption{分季 AUC 表现稳定。}
+\end{figure}
+
+\keyoutput{双模型对比与任务 3 的直接回答。}
+
+\section{模型D：机制设计（DAWS）}
+\takeaway{DAWS 以不确定性驱动权重调整，满足单调性与稳定性。}
+\begin{equation}
+\alpha_t=\text{clip}\Big(\alpha_0+\gamma \frac{t}{T}-\eta U_t,\ \alpha_{\min},\alpha_{\max}\Big),\quad |\alpha_t-\alpha_{t-1}|\le\delta.
+\end{equation}
+\begin{proposition}[单调性]
+评委与粉丝占比同时上升时，DAWS 得分不下降。
+\end{proposition}
+\begin{proposition}[稳定性界]
+\begin{equation}
+|c_{i,t}-c_{i,t-1}|\le \delta|j_{i,t}-v_{i,t}|+(1-\alpha_t)\|\mathbf v_t-\mathbf v_{t-1}\|+\alpha_t\|\mathbf j_t-\mathbf j_{t-1}\|.
+\end{equation}
+\end{proposition}
+
+\subsection{Judge-save 参数学习}
+\begin{equation}
+\Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
+\end{equation}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{figures/fig_judgesave_curve.pdf}
+\caption{Judge-save 决策曲线。}
+\end{figure}
+
+\keyoutput{DAWS 方案、性质与 judge-save 行为刻画。}
+
+\section{敏感性与验证}
+\takeaway{关键结论对 $\sigma$、$\epsilon$ 与规则切换先验具有稳健性。}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.80\linewidth]{figures/fig_ppc_summary.pdf}
+\caption{后验预测检验结果。}
+\end{figure}
+
+\keyoutput{敏感性曲线与后验预测覆盖率。}
+
+\section{结论与建议}
+\takeaway{审计先行揭示关键不确定性，DAWS 提供稳健折中。}
+我们完成全赛季粉丝票审计，量化 Rank 机制的民主赤字，并提出 DAWS 方案以提升公平、主权与稳定。
+
+\clearpage
+\section*{参考文献}
+\addcontentsline{toc}{section}{参考文献}
+\begin{thebibliography}{9}
+\bibitem{comap2026} COMAP. 2026 MCM/ICM Problem C: Dancing with the Stars (DWTS). Contest Problem Statement.
+\bibitem{hitandrun} Smith, R. (1984). Efficient Monte Carlo procedures for generating points uniformly in polytopes. \textit{Operations Research}.
+\bibitem{maxent} Jaynes, E. T. (1957). Information theory and statistical mechanics. \textit{Physical Review}.
+\bibitem{bayes} Gelman, A., et al. (2013). \textit{Bayesian Data Analysis}. CRC Press.
+\bibitem{mechanism} Moulin, H. (1988). \textit{Axioms of Cooperative Decision Making}. Cambridge Univ. Press.
+\end{thebibliography}
+
+\clearpage
+\section*{AI 使用报告}
+\addcontentsline{toc}{section}{AI 使用报告}
+我们使用 AI 协助完成论文结构草稿、LaTeX 模板与方法表述润色；所有模型选择与解释均由团队复核并最终确认。
+
+\end{document}
