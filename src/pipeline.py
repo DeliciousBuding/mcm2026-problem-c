@@ -1135,7 +1135,15 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # Uncertainty heatmap
     plt.figure(figsize=(6.4, 3.8))
-    sns.heatmap(heat, cmap="cividis", cbar_kws={"label": "Mean HDI width"})
+    ax = sns.heatmap(
+        heat,
+        cmap="cividis",
+        cbar_kws={"label": "Mean HDI width"},
+    )
+    ax.set_xticks(np.arange(max_week) + 0.5)
+    ax.set_xticklabels(np.arange(1, max_week + 1))
+    ax.set_yticks(np.arange(max_season) + 0.5)
+    ax.set_yticklabels(np.arange(1, max_season + 1))
     plt.xlabel("Week")
     plt.ylabel("Season")
     plt.title("Uncertainty concentrates in a small set of weeks")
@@ -1144,7 +1152,15 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # Wrongful heatmap
     plt.figure(figsize=(6.4, 3.8))
-    sns.heatmap(wrongful_heat, cmap="cividis", cbar_kws={"label": "Wrongful prob"})
+    ax = sns.heatmap(
+        wrongful_heat,
+        cmap="cividis",
+        cbar_kws={"label": "Wrongful prob"},
+    )
+    ax.set_xticks(np.arange(max_week) + 0.5)
+    ax.set_xticklabels(np.arange(1, max_week + 1))
+    ax.set_yticks(np.arange(max_season) + 0.5)
+    ax.set_yticklabels(np.arange(1, max_season + 1))
     plt.xlabel("Week")
     plt.ylabel("Season")
     plt.title("Wrongful elimination probability by week")
@@ -1157,9 +1173,15 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     sizes = 200 * cm_df["hdi_width"].clip(0, cm_df["hdi_width"].quantile(0.95))
     colors = cm_df["is_eliminated_week"].map(lambda x: COLOR_WARNING if x else COLOR_PRIMARY)
     plt.scatter(cm_df["judge_share"], cm_df["fan_share_mean"], s=sizes, c=colors, alpha=0.75, edgecolors="none")
+    legend_handles = [
+        plt.Line2D([0], [0], marker="o", color="w", label="Eliminated week", markerfacecolor=COLOR_WARNING, markersize=6),
+        plt.Line2D([0], [0], marker="o", color="w", label="Not eliminated", markerfacecolor=COLOR_PRIMARY, markersize=6),
+        plt.Line2D([0], [0], marker="o", color="w", label="HDI width (size)", markerfacecolor=COLOR_GRAY, markersize=8),
+    ]
     plt.xlabel("Judge share")
     plt.ylabel("Fan share (posterior mean)")
     plt.title("Elimination is not always aligned with minimum fan support")
+    plt.legend(handles=legend_handles, frameon=False, fontsize=8, loc="lower right")
     plt.savefig(FIG_DIR / "fig_conflict_map.pdf")
     plt.close()
 
@@ -1177,6 +1199,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     colors = combo_df["is_eliminated_week"].map(lambda x: COLOR_WARNING if x else COLOR_PRIMARY)
     plt.scatter(combo_df["judge_share"], combo_df["fan_share_mean"], s=sizes, c=colors, alpha=0.70, edgecolors="none")
     wrongful_pts = combo_df[combo_df["wrongful"]]
+    legend_handles = [
+        plt.Line2D([0], [0], marker="o", color="w", label="Eliminated week", markerfacecolor=COLOR_WARNING, markersize=6),
+        plt.Line2D([0], [0], marker="o", color="w", label="Not eliminated", markerfacecolor=COLOR_PRIMARY, markersize=6),
+        plt.Line2D([0], [0], marker="o", color="w", label="HDI width (size)", markerfacecolor=COLOR_GRAY, markersize=8),
+    ]
     if not wrongful_pts.empty:
         plt.scatter(
             wrongful_pts["judge_share"],
@@ -1191,7 +1218,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.ylabel("Fan share (posterior mean)")
     plt.title("Conflict + uncertainty + wrongful eliminations")
     if not wrongful_pts.empty:
-        plt.legend(loc="lower right", frameon=False, fontsize=8)
+        legend_handles.append(
+            plt.Line2D([0], [0], marker="o", color=COLOR_PRIMARY_DARK, label="Wrongful elimination", markerfacecolor="none", markersize=7),
+        )
+    plt.legend(handles=legend_handles, loc="lower right", frameon=False, fontsize=8)
     plt.savefig(FIG_DIR / "fig_conflict_combo.pdf")
     plt.close()
 
