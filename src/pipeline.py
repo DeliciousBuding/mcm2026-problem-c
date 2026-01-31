@@ -343,6 +343,12 @@ def evaluate_mechanisms(
     agency_s = np.mean(fan_lowest == elim_s)
     agency_d = np.mean(fan_lowest == elim_d)
 
+    judge_lowest = int(np.argmin(j_share))
+    integrity_p = np.mean(elim_p == judge_lowest)
+    integrity_r = np.mean(elim_r == judge_lowest)
+    integrity_s = np.mean(elim_s == judge_lowest)
+    integrity_d = np.mean(elim_d == judge_lowest)
+
     noise = rng.normal(0, 0.02, size=samples.shape)
     v_noise = np.maximum(samples + noise, eps)
     v_noise = v_noise / v_noise.sum(axis=1, keepdims=True)
@@ -354,10 +360,10 @@ def evaluate_mechanisms(
     instability_d = np.mean(elim_d != elim_noise)
 
     return {
-        "percent": {"fairness": tau_mean, "agency": agency_p, "instability": instability_p},
-        "rank": {"fairness": tau_mean, "agency": agency_r, "instability": instability_r},
-        "save": {"fairness": tau_mean, "agency": agency_s, "instability": instability_s},
-        "daws": {"fairness": tau_mean, "agency": agency_d, "instability": instability_d},
+        "percent": {"fairness": tau_mean, "agency": agency_p, "instability": instability_p, "judge_integrity": integrity_p},
+        "rank": {"fairness": tau_mean, "agency": agency_r, "instability": instability_r, "judge_integrity": integrity_r},
+        "save": {"fairness": tau_mean, "agency": agency_s, "instability": instability_s, "judge_integrity": integrity_s},
+        "daws": {"fairness": tau_mean, "agency": agency_d, "instability": instability_d, "judge_integrity": integrity_d},
         "flip_sum": float(np.sum(elim_p != elim_r)),
         "count": m,
     }
@@ -835,10 +841,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     # 机制评估
     log("Evaluating mechanism metrics...")
     metrics = {
-        "percent": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
-        "rank": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
-        "save": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
-        "daws": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "count": 0},
+        "percent": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+        "rank": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+        "save": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+        "daws": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
     }
     flip_sum = 0.0
     flip_count = 0
@@ -874,6 +880,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             metrics[key]["fairness_sum"] += eval_res[key]["fairness"] * m
             metrics[key]["agency_sum"] += eval_res[key]["agency"] * m
             metrics[key]["instability_sum"] += eval_res[key]["instability"] * m
+            metrics[key]["judge_integrity_sum"] += eval_res[key]["judge_integrity"] * m
             metrics[key]["count"] += m
 
         flip_sum += float(eval_res["flip_sum"])
@@ -881,11 +888,17 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     def agg_stats(d: Dict[str, float]) -> Dict[str, float]:
         if d["count"] == 0:
-            return {"fairness": float("nan"), "agency": float("nan"), "stability": float("nan")}
+            return {"fairness": float("nan"), "agency": float("nan"), "stability": float("nan"), "judge_integrity": float("nan")}
         fairness = d["fairness_sum"] / d["count"]
         agency = d["agency_sum"] / d["count"]
         stability = 1.0 - (d["instability_sum"] / d["count"])
-        return {"fairness": float(fairness), "agency": float(agency), "stability": float(stability)}
+        judge_integrity = d["judge_integrity_sum"] / d["count"]
+        return {
+            "fairness": float(fairness),
+            "agency": float(agency),
+            "stability": float(stability),
+            "judge_integrity": float(judge_integrity),
+        }
 
     stats_percent = agg_stats(metrics["percent"])
     stats_rank = agg_stats(metrics["rank"])
@@ -1295,32 +1308,55 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.savefig(FIG_DIR / "fig_mechanism_compare.pdf")
     plt.close()
 
-    # Ternary-like plot
-    plt.figure(figsize=(4.8, 4.2))
-    def barycentric(a, b, c):
-        x = 0.5 * (2 * b + c) / (a + b + c)
-        y = (math.sqrt(3) / 2) * c / (a + b + c)
-        return x, y
+    # Pareto-like trade-off (2D)
+    def stats_for_alpha(alpha: float) -> Dict[str, float]:
+        totals = {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0}
+        for (season, week), wdf in season_week_groups:
+            active_df = wdf[wdf["active"]].copy()
+            if len(active_df) == 0:
+                continue
+            key = (int(season), int(week))
+            samples = samples_cache.get(key)
+            if samples is None or len(samples) == 0:
+                samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+                samples_cache[key] = samples
+            if len(samples) == 0:
+                continue
+            res = evaluate_mechanisms(samples, active_df, alpha, EPSILON, RNG)
+            m = res["count"]
+            totals["agency_sum"] += res["daws"]["agency"] * m
+            totals["instability_sum"] += res["daws"]["instability"] * m
+            totals["judge_integrity_sum"] += res["daws"]["judge_integrity"] * m
+            totals["count"] += m
+        if totals["count"] == 0:
+            return {"agency": float("nan"), "stability": float("nan"), "judge_integrity": float("nan")}
+        agency = totals["agency_sum"] / totals["count"]
+        stability = 1.0 - (totals["instability_sum"] / totals["count"])
+        judge_integrity = totals["judge_integrity_sum"] / totals["count"]
+        return {"agency": float(agency), "stability": float(stability), "judge_integrity": float(judge_integrity)}
 
-    pts = []
-    alphas = np.linspace(0.35, 0.75, 9)
-    for a in alphas:
-        # 简化：用线性插值
-        f = stats_percent["fairness"] * (1 - a) + stats_rank["fairness"] * a
-        ag = stats_percent["agency"] * (1 - a) + stats_rank["agency"] * a
-        st = stats_percent["stability"] * (1 - a) + stats_rank["stability"] * a
-        x, y = barycentric(f, ag, st)
-        pts.append((x, y))
-    xs, ys = zip(*pts)
-    plt.scatter(xs, ys, color=COLOR_PRIMARY, s=25)
-    dx, dy = barycentric(stats_daws["fairness"], stats_daws["agency"], stats_daws["stability"])
-    plt.scatter([dx], [dy], color=COLOR_ACCENT, s=60, marker="*")
-    # 画三角形边界
-    tri = np.array([barycentric(1,0,0), barycentric(0,1,0), barycentric(0,0,1), barycentric(1,0,0)])
-    plt.plot(tri[:,0], tri[:,1], color=COLOR_GRAY)
-    plt.title("DAWS on the trade-off surface")
-    plt.axis("off")
-    plt.savefig(FIG_DIR / "fig_ternary_daws.pdf")
+    alpha_grid = np.linspace(0.05, 0.95, 10)
+    curve = [stats_for_alpha(a) for a in alpha_grid]
+    xs = [c["agency"] for c in curve]
+    ys = [c["stability"] for c in curve]
+    cs = [c["judge_integrity"] for c in curve]
+
+    plt.figure(figsize=(5.2, 4.2))
+    plt.plot(xs, ys, color=COLOR_GRAY, linewidth=1.1, alpha=0.6)
+    sc = plt.scatter(xs, ys, c=cs, cmap="cividis", s=25, zorder=2)
+    plt.scatter(stats_percent["agency"], stats_percent["stability"], color=COLOR_PRIMARY, s=55, marker="o", label="Percent")
+    plt.scatter(stats_rank["agency"], stats_rank["stability"], color=COLOR_GRAY, s=55, marker="s", label="Rank")
+    plt.scatter(stats_daws["agency"], stats_daws["stability"], color=COLOR_ACCENT, s=85, marker="*", label="DAWS")
+    plt.xlabel("Viewer agency")
+    plt.ylabel("Stability")
+    plt.ylim(0, 1)
+    plt.xlim(0, 1)
+    plt.title("Pareto trade-off: agency vs stability")
+    plt.legend(frameon=False, fontsize=8, loc="lower left")
+    cbar = plt.colorbar(sc, fraction=0.046, pad=0.04)
+    cbar.set_label("Judge integrity")
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_pareto_2d.pdf")
     plt.close()
 
     # Pro dancer forest (简化 Top 20)
