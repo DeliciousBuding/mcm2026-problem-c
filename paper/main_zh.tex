@@ -332,7 +332,7 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_fast_vs_strict.pdf}
-\caption{Fast 与 Strict 后验均值对比，偏离程度有限（对角线为一致，偏离衡量近似误差）。}
+\caption{Fast 与 Strict 后验均值对比，偏离程度有限（对角线为一致，偏离衡量近似误差；MAE=\MetricFastMAE，Top-1=\MetricFastTopOne\%，Top-2=\MetricFastTopTwo\%）。}
 \end{figure}
 
 \subsection{可识别性与可行质量}
@@ -487,7 +487,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
-\caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率）。}
+\caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率；示意曲线使用 $\beta=1.8$，分差越大则低分选手被淘汰概率越高）。}
 \end{figure}
 
 \keyoutput{DAWS 方案、性质与 judge-save 行为刻画。}
@@ -497,7 +497,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_ppc_summary.pdf}
-\caption{后验预测检验结果（Coverage 越高越好，Brier 越低越好）。}
+\caption{后验预测检验结果（Coverage 越高越好，Brier 越低越好；Brier 反映概率预测误差大小）。}
 \end{figure}
 
 \subsection{规模对比实验}
