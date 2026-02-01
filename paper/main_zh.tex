@@ -136,7 +136,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \node[red!70,anchor=west,scale=0.7] at (0.82,0.30) {elim};
 \end{tikzpicture}
 \end{center}
-\textbf{建议.} 采用分段阈值化的 DAWS 权重 $\alpha_t$，并公开 bottom-two 与 judge-save 判定标准。
+\textbf{建议.} 采用 DAWS 三档风控协议（红/黄/绿），并公开 bottom-two 与 judge-save 判定标准。
 \end{minipage}
 
 \clearpage
@@ -152,31 +152,16 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \addcontentsline{toc}{section}{备忘录}
 \textbf{收件人：} DWTS 制作方与评委\\
 \textbf{发件人：} Team \Team\\
-\textbf{日期：} 2026年1月31日\\
+\textbf{日期：} 2026年2月1日\\
 \textbf{主题：} 粉丝投票可行性审计与规则改进建议
 
 \takeaway{我们审计全部赛季并量化粉丝票不确定性。证据显示，Rank 聚合存在信息压缩，并加大民主赤字。}
 
-\textbf{执行摘要（6 行以内）.}
-\begin{itemize}[leftmargin=2em]
-\item 规则整体与淘汰结果一致（$S^*\approx 0$），但不确定性在不同周差异明显。
-\item Rank 聚合是对粉丝支持度的有损压缩，造成显著翻转概率。
-\item DAWS 提升能动性与评委一致性，但稳定性略有代价（权衡方案）。
-\end{itemize}
+\textbf{执行摘要.} 审计结果显示，Rank 规则会压缩粉丝支持度：约每 5 周中就有 1 周出现淘汰翻转风险。这形成“民主赤字”，并带来不必要的争议与声誉风险。
 
-\textbf{主要发现.}
-\begin{enumerate}[leftmargin=2em]
-\item \textbf{可识别性差异显著。} 最宽 95\% HDI 周度区间超过中位周 3 倍。
-\item \textbf{机制差异具有实质影响。} Rank 与 Percent 在约 1/5 周出现淘汰翻转。
-\item \textbf{影响因素对评委与粉丝不同。} 混合效应模型显示职业舞伴对粉丝影响更强。
-\end{enumerate}
+\textbf{方案.} 我们提出 DAWS 三档风控协议，由不确定性指数触发：绿档为常规 50/50；黄档启动 judge-save；红档（决赛周）完全观众投票。该方案规则公开、易于解释且可直接执行。
 
-\textbf{建议.}
-\begin{enumerate}[leftmargin=2em]
-\item 公布 DAWS 方案并基于不确定性指数 $U_t$ 的分段阈值规则调整 $\alpha_t$。
-\item 公开 judge-save 规则与投票记录，提高透明度。
-\item 用审计仪表盘提前预警高不确定周。
-\end{enumerate}
+\textbf{价值.} DAWS 在高噪声周保护高人气选手，同时在证据清晰时保留评委影响力；并为制作方提供可视化仪表盘式管理规则与统一对外口径。
 
 \noindent\begin{minipage}[t]{0.49\linewidth}
 \centering
@@ -260,7 +245,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 
 \section{假设与指标}
 \takeaway{使用观众能动性、评委一致性与稳定指标评价机制，并辅以冲突指数与民主赤字。}
-假设：(i) 粉丝占比非负且有下限；(ii) 规则被遵守，除非 slack 提示张力；(iii) 周与周之间平滑。
+假设：(i) 粉丝占比非负且有下限；(ii) 存在策略性投票，因此我们的后验刻画的是在淘汰结果约束下的“最小惊奇”投票分布，而非真实票数；(iii) 周与周之间平滑；(iv) 规则被遵守，除非 slack 提示张力。
 
 指标（高者更好，除非说明）：
 \begin{itemize}[leftmargin=2em]
@@ -273,7 +258,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 \keyoutput{统一指标接口用于机制对比。}
 
 \begin{takeawaybox}
-\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用基于 $U_t$ 分位的分段阈值权重，judge-save 曲线使用校准的 $\beta=1.8$ 作为示意。
+\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用基于 $U_t$ 的三档风控协议（固定阈值 + 决赛红档覆盖），judge-save 曲线使用校准的 $\beta=1.8$ 作为示意。
 \end{takeawaybox}
 
 \section{模型A：可行区域审计}
@@ -355,11 +340,7 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{equation}
  p(\mathbf v_{1:T}|\text{rules,data})\propto \Big[\prod_t \mathbf{1}(\mathbf v_t\in\mathcal{P}_t)\Big]\cdot\prod_{t=2}^T \exp\Big(-\frac{\|\mathbf v_t-\mathbf v_{t-1}\|^2}{2\sigma^2}\Big).
 \end{equation}
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/fig_sigma_sensitivity.pdf}
-\caption{结论对 $\sigma$ 较为稳健（横轴平滑参数，纵轴平均 HDI）。}
-\end{figure}
+结论对 $\sigma$ 较为稳健，详见附录~\ref{app:sensitivity}。
 
 \subsection{规则切换推断}
 \takeaway{按题目假设采用第 28 季为切换点，并提供探索性变点检验。}
@@ -423,7 +404,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.96\linewidth]{figures/fig_counterfactual_risk_timeline.pdf}
-\caption{争议人物的反事实淘汰风险时间线（纵轴为每周被淘汰概率，四条线对应 percent/rank/judge-save/DAWS；用于回答“规则改变是否改变淘汰风险”）。}
+\caption{争议人物的反事实淘汰风险时间线（纵轴为每周被淘汰概率，四条线对应 percent/rank/judge-save/DAWS；用于回答"规则改变是否改变淘汰风险"）。\textit{注：DAWS 在能动性与稳定性之间取得权衡，非全面最优。}}
 \label{fig:counterfactual-risk}
 \end{figure}
 
@@ -435,7 +416,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_pareto_2d.pdf}
-\caption{观众参与度与稳定性的 Pareto 权衡，颜色表示评委一致性（曲线为 $\alpha$ 扫描，星标为 DAWS）。}
+\caption{观众参与度与稳定性的 Pareto 权衡，颜色表示评委一致性（曲线为 $\alpha$ 扫描，星标为 DAWS）。\textit{注：无绝对最优解，DAWS 选择近 Pareto 最优点。}}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.49\linewidth}
@@ -468,40 +449,32 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 
 \subsection{预测补充：GBDT}
 \takeaway{预测模型仅作为协变量有效性的鲁棒性检验。}
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.90\linewidth]{figures/fig_auc_forward.pdf}
-\caption{分季 AUC 表现稳定（前向链式验证）。}
-\end{figure}
+GBDT 分季 AUC 表现稳定，详见附录~\ref{app:auc}。
 
 \keyoutput{双模型对比与任务 3 的直接回答。}
 
 \section{模型D：机制设计（DAWS）}
-\takeaway{DAWS 采用分段阈值权重：常规周保持 50/50，高不确定周提高评委权重（透明可执行）。}
-\begin{equation}
-\alpha_t=
-\begin{cases}
-\alpha_0,& U_t\le q_{90},\\
-\alpha_1,& q_{90}<U_t\le q_{97},\\
-\alpha_2,& U_t>q_{97},
-\end{cases}
-\end{equation}
-其中 $q_{90},q_{97}$ 为 $U_t$ 的分位阈值（仅在最不确定的周触发更高权重）。
-图~\ref{fig:daws-trigger} 展示阈值触发与权重档位的对应关系，强调规则可解释与可执行。
+\takeaway{DAWS 是三档风控协议：红/黄/绿，对应清晰可执行的动作。}
+我们定义风险指数 $R_t=U_t$（周度 HDI 宽度），并采用离散规则：
+\begin{itemize}[leftmargin=2em]
+\item \textbf{Tier 1（绿）.} $R_t<0.4$ \;\;$\Rightarrow$ 常规 50/50（评委/观众各半）。
+\item \textbf{Tier 2（黄）.} $R_t\ge 0.4$ \;\;$\Rightarrow$ 启动 judge-save（bottom-two + save）。
+\item \textbf{Tier 3（红）.} 决赛周 \;\;$\Rightarrow$ 100\% 观众投票。
+\end{itemize}
+阈值固定且可公开，强调规则透明与可执行。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
-\caption{DAWS 触发与权重档位（上：$U_t$ 与公开阈值；下：对应的评委权重档位阶梯，常规/争议/极端周）。}
+\caption{DAWS 触发与档位（上：$U_t$ 与风险阈值；下：对应的档位阶梯，绿/黄/红）。}
 \label{fig:daws-trigger}
 \end{figure}
-\begin{proposition}[单调性]
-评委与粉丝占比同时上升时，DAWS 得分不下降。
-\end{proposition}
-\begin{proposition}[稳定性界]
-\begin{equation}
-|c_{i,t}-c_{i,t-1}|\le |\alpha_t-\alpha_{t-1}||j_{i,t}-v_{i,t}|+(1-\alpha_t)\|\mathbf v_t-\mathbf v_{t-1}\|+\alpha_t\|\mathbf j_t-\mathbf j_{t-1}\|.
-\end{equation}
-\end{proposition}
+我们提供面向制片方的仪表盘概念图用于落地执行（见图~\ref{fig:dashboard-concept}）。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_dashboard_concept.pdf}
+\caption{制片人仪表盘概念图：当前档位、审计窗（HDI 条）与动作建议。}
+\label{fig:dashboard-concept}
+\end{figure}
 
 \subsection{Judge-save 参数设定}
 \begin{equation}
@@ -513,7 +486,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率；示意曲线使用 $\beta=1.8$，分差越大则低分选手被淘汰概率越高）。}
 \end{figure}
 
-\keyoutput{DAWS 方案、性质与校准的 judge-save 行为刻画。}
+\keyoutput{DAWS 档位协议与校准的 judge-save 行为刻画。}
 
 \section{敏感性与验证}
 \takeaway{关键结论对 $\sigma$、$\epsilon$ 与规则切换先验具有稳健性。}
@@ -539,8 +512,28 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{itemize}[leftmargin=2em]
 \item \textbf{可读结论：} 不确定性集中在少数周，其余周可识别性较高。
 \item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 提升能动性但稳定性略有代价（见图~\ref{fig:counterfactual-risk} 与图~\ref{fig:daws-trigger}）。
-\item \textbf{落地建议：} 公布 DAWS 权重计划与 judge-save 规则以提升透明度。
+\item \textbf{落地建议：} 公布 DAWS 档位规则与 judge-save 规则以提升透明度。
 \end{itemize}
+
+\clearpage
+\appendix
+\section{敏感性分析}\label{app:sensitivity}
+本附录展示平滑参数 $\sigma$ 的敏感性分析。主要结论在测试范围内保持稳健。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_sigma_sensitivity.pdf}
+\caption{$\sigma$ 敏感性：结论对平滑参数较为稳健（横轴为 $\sigma$，纵轴为平均 HDI）。}
+\label{fig:sigma-sensitivity}
+\end{figure}
+
+\section{预测校准}\label{app:auc}
+本附录提供 GBDT 前向链式验证的 AUC 结果，作为协变量有效性的鲁棒性检验。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_auc_forward.pdf}
+\caption{分季 AUC 表现稳定（前向链式验证）。}
+\label{fig:auc-forward}
+\end{figure}
 
 \clearpage
 \section*{参考文献}

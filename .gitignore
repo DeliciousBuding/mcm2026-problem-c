@@ -1,4 +1,10 @@
-# Build artifacts
+# Data (do NOT commit large/secret datasets)
+/data/*.csv
+
+# Generated outputs
+/outputs/
+
+# Build artifacts (LaTeX)
 paper/*.aux
 paper/*.log
 paper/*.out
@@ -10,5 +16,14 @@ paper/*.synctex.gz
 # Runtime logs
 outputs/run.log
 
-# Editor files
-*.tmp
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editor/OS
+.vscode/
+.DS_Store
+Thumbs.db

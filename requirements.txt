@@ -1,0 +1,19 @@
+# MCM/ICM 2026 Problem C - Python Dependencies
+# 核心科学计算
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# 可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# 统计建模
+statsmodels>=0.14.0
+scikit-learn>=1.3.0
+
+# 优化求解
+pulp>=2.7.0
+
+# 测试
+pytest>=7.0.0
