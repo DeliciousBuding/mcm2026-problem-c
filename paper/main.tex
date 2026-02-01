@@ -492,6 +492,12 @@ We also provide a producer-facing dashboard concept for operational use (Fig.~\r
 \label{fig:dashboard-concept}
 \end{figure}
 
+We model judge behavior with a simple utility view: for a bottom-two pair, the save decision trades off skill, ratings, and backlash risk. A minimal formulation is
+\begin{equation}
+U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Backlash}_A,
+\end{equation}
+which motivates a probabilistic (logit) choice without claiming perfect rationality.
+
 \subsection{Judge-save parameter calibration}
 We use a calibrated $\beta$ in
 \begin{equation}

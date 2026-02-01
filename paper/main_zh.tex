@@ -476,6 +476,12 @@ GBDT 分季 AUC 表现稳定，详见附录~\ref{app:auc}。
 \label{fig:dashboard-concept}
 \end{figure}
 
+评委的保存决策可以用效用框架解释：在 bottom-two 中权衡技能、收视与舆情风险。一个最简表述为
+\begin{equation}
+U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Backlash}_A,
+\end{equation}
+这支持用 logit 概率刻画，但不假设绝对理性。
+
 \subsection{Judge-save 参数设定}
 \begin{equation}
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
