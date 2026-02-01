@@ -19,6 +19,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # 使用非交互式后端便于批量导图
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle, Circle, FancyBboxPatch
 import seaborn as sns
 from scipy.ndimage import gaussian_filter1d
 import pulp
@@ -54,6 +55,9 @@ FAST_STRICT_ENABLED = os.getenv("MCM_FAST_STRICT", "1") != "0"  # 是否进行 F
 FAST_STRICT_PROPS = int(os.getenv("MCM_STRICT_PROPS", "2000"))  # Strict 校验采样规模
 FAST_STRICT_MAX_SAMPLES = int(os.getenv("MCM_STRICT_MAX_SAMPLES", "600"))  # Strict 校验最大样本数
 RULE_SWITCH_BOOT = int(os.getenv("MCM_RULE_BOOT", "200"))  # 规则切换置信带 bootstrap 次数
+RUN_SYNTHETIC_VALIDATION = os.getenv("MCM_SYNTHETIC", "0") != "0"  # 是否在主流程后运行 Synthetic Validation
+RUN_SYNTHETIC_ONLY = os.getenv("MCM_SYNTHETIC_ONLY", "0") != "0"  # 是否仅运行 Synthetic Validation
+DAWS_RISK_THRESHOLD = float(os.getenv("MCM_DAWS_THRESHOLD", "0.4"))  # DAWS 风险阈值（HDI 宽度）
 
 # DAWS 分段阈值与权重（强调可公开、可执行）
 DAWS_ALPHA_BASE = 0.50
@@ -267,6 +271,15 @@ def compute_alpha_t(mean_width: float,
     return float(alpha_base)
 
 
+def determine_daws_tier(mean_width: float, week: int, final_week: int) -> Tuple[str, str]:
+    """根据风险指数与周次给出 DAWS 档位与动作。"""
+    if week >= final_week:
+        return "Red", "Audience Only"
+    if mean_width < DAWS_RISK_THRESHOLD:
+        return "Green", "Standard 50/50"
+    return "Yellow", "Activate Judge Save"
+
+
 def apply_percent_mask(
     proposals: np.ndarray,
     j_share: np.ndarray,
@@ -309,6 +322,7 @@ def evaluate_mechanisms(
     samples: np.ndarray,
     active_df: pd.DataFrame,
     alpha_t: float,
+    daws_tier: str,
     eps: float,
     rng: np.random.Generator,
 ) -> Dict[str, object]:
@@ -329,9 +343,6 @@ def evaluate_mechanisms(
     comb_rank = fan_rank + j_rank_matrix
     elim_r = np.argmax(comb_rank, axis=1)
 
-    comb_daws = alpha_t * j_share_matrix + (1 - alpha_t) * samples
-    elim_d = np.argmin(comb_daws, axis=1)
-
     bottom_two = np.argpartition(comb_rank, -2, axis=1)[:, -2:]
     a_idx = bottom_two[:, 0]
     b_idx = bottom_two[:, 1]
@@ -339,6 +350,14 @@ def evaluate_mechanisms(
     p_elim_a = 1 / (1 + np.exp(JUDGESAVE_BETA * diff))
     rand_u = rng.random(m)
     elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
+
+    if daws_tier == "Red":
+        elim_d = np.argmin(samples, axis=1)
+    elif daws_tier == "Yellow":
+        elim_d = elim_s
+    else:
+        comb_daws = alpha_t * j_share_matrix + (1 - alpha_t) * samples
+        elim_d = np.argmin(comb_daws, axis=1)
 
     n = len(j_rank)
     if n < 2:
@@ -386,9 +405,6 @@ def evaluate_mechanisms(
     comb_rank_noise = fan_rank_noise + j_rank_matrix
     elim_noise_r = np.argmax(comb_rank_noise, axis=1)
 
-    comb_daws_noise = alpha_t * j_share_matrix + (1 - alpha_t) * v_noise
-    elim_noise_d = np.argmin(comb_daws_noise, axis=1)
-
     bottom_two_noise = np.argpartition(comb_rank_noise, -2, axis=1)[:, -2:]
     a_n = bottom_two_noise[:, 0]
     b_n = bottom_two_noise[:, 1]
@@ -396,6 +412,14 @@ def evaluate_mechanisms(
     p_elim_a_n = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_n))
     rand_u_n = rng.random(m)
     elim_noise_s = np.where(rand_u_n < p_elim_a_n, a_n, b_n)
+
+    if daws_tier == "Red":
+        elim_noise_d = np.argmin(v_noise, axis=1)
+    elif daws_tier == "Yellow":
+        elim_noise_d = elim_noise_s
+    else:
+        comb_daws_noise = alpha_t * j_share_matrix + (1 - alpha_t) * v_noise
+        elim_noise_d = np.argmin(comb_daws_noise, axis=1)
 
     instability_p = np.mean(elim_p != elim_noise_p)
     instability_r = np.mean(elim_r != elim_noise_r)
@@ -492,6 +516,268 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
 
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_scale_benchmark.pdf", dpi=600)
+    plt.close(fig)
+
+
+def build_synthetic_long_df(
+    n_seasons: int,
+    base_contestants: int,
+    noise_sigma: float,
+    rng: np.random.Generator,
+) -> pd.DataFrame:
+    """生成合成赛季长表（含真值 fan share 与淘汰信息）。"""
+    records: List[Dict[str, object]] = []
+    for season in range(1, n_seasons + 1):
+        n_contestants = int(base_contestants + rng.integers(-1, 2))
+        n_contestants = max(6, n_contestants)
+        names = [f"S{season}_C{i + 1}" for i in range(n_contestants)]
+        popularity = rng.normal(1.0, 0.08, size=n_contestants)
+        popularity = np.clip(popularity, 0.85, 1.15)
+        alive = list(range(n_contestants))
+
+        for week in range(1, n_contestants):
+            judge_total = rng.normal(24.0, 4.0, size=len(alive))
+            judge_total = np.clip(judge_total, 8.0, None)
+            judge_share = judge_total / judge_total.sum()
+
+            # True fan vote = 0.3 * Judge_Score + 0.7 * Popularity_Bias + Noise
+            pop_score = popularity[alive] * float(np.mean(judge_total))
+            noise = rng.normal(0.0, noise_sigma, size=len(alive))
+            raw = 0.3 * judge_total + 0.7 * pop_score + noise
+            raw = np.maximum(raw, EPSILON)
+            fan_share = raw / raw.sum()
+
+            combined = ALPHA_PERCENT * judge_share + (1 - ALPHA_PERCENT) * fan_share
+            elim_local = int(np.argmin(combined))
+
+            for i, idx in enumerate(alive):
+                records.append({
+                    "season": int(season),
+                    "week": int(week),
+                    "celebrity_name": names[idx],
+                    "judge_total": float(judge_total[i]),
+                    "true_fan_share": float(fan_share[i]),
+                    "popularity_bias": float(popularity[idx]),
+                    "active": True,
+                    "is_eliminated_week": bool(i == elim_local),
+                })
+
+            alive.pop(elim_local)
+
+    return pd.DataFrame(records)
+
+
+def synthetic_data_validation(
+    n_seasons: int = 10,
+    base_contestants: int = 10,
+    n_props: int | None = None,
+    noise_sigma: float = 0.3,
+    rng: np.random.Generator | None = None,
+    save_outputs: bool = True,
+) -> Dict[str, float]:
+    """上帝视角验证：用合成数据检查反演区间覆盖率。"""
+    ensure_dirs()
+    set_plot_style()
+    rng = rng or np.random.default_rng(20260201)
+    n_props = int(n_props or max(1500, N_PROPOSALS))
+
+    log("Running synthetic validation...")
+    long_df = build_synthetic_long_df(n_seasons, base_contestants, noise_sigma, rng)
+    if long_df.empty:
+        return {"coverage": float("nan")}
+
+    long_df["judge_share"] = long_df.groupby(["season", "week"])["judge_total"].transform(
+        lambda x: x / x.sum() if x.sum() > 0 else np.nan
+    )
+
+    posterior_rows: List[Dict[str, object]] = []
+    for (season, week), wdf in long_df.groupby(["season", "week"], sort=True):
+        samples, acc_rate = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props, rng)
+        if len(samples) == 0:
+            continue
+        if len(samples) > MAX_SAMPLES_PER_WEEK:
+            idx = rng.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
+            samples = samples[idx]
+
+        lower = np.quantile(samples, 0.025, axis=0)
+        upper = np.quantile(samples, 0.975, axis=0)
+        mean = samples.mean(axis=0)
+
+        wdf = wdf.reset_index(drop=True)
+        for i, row in wdf.iterrows():
+            posterior_rows.append({
+                "season": int(season),
+                "week": int(week),
+                "celebrity_name": row["celebrity_name"],
+                "true_fan_share": float(row["true_fan_share"]),
+                "fan_share_mean": float(mean[i]),
+                "hdi_lower": float(lower[i]),
+                "hdi_upper": float(upper[i]),
+                "accept_rate": float(acc_rate),
+            })
+
+    posterior_df = pd.DataFrame(posterior_rows)
+    if posterior_df.empty:
+        return {"coverage": float("nan")}
+
+    posterior_df["covered"] = (
+        (posterior_df["true_fan_share"] >= posterior_df["hdi_lower"])
+        & (posterior_df["true_fan_share"] <= posterior_df["hdi_upper"])
+    )
+    coverage = float(posterior_df["covered"].mean())
+
+    summary = {
+        "n_seasons": int(n_seasons),
+        "base_contestants": int(base_contestants),
+        "n_props": int(n_props),
+        "noise_sigma": float(noise_sigma),
+        "n_points": int(len(posterior_df)),
+        "coverage": coverage,
+    }
+
+    if save_outputs:
+        (OUTPUT_DIR / "synthetic_validation.json").write_text(
+            json.dumps(summary, indent=2),
+            encoding="utf-8",
+        )
+        posterior_df.to_csv(OUTPUT_DIR / "synthetic_validation.csv", index=False, encoding="utf-8")
+
+    # 绘制单个选手的上帝视角验证图
+    focus_stats = posterior_df.groupby(["season", "celebrity_name"])["covered"].agg(["mean", "count"])
+    focus_stats = focus_stats.sort_values(["mean", "count"], ascending=False)
+    focus_season = int(focus_stats.index[0][0])
+    focus_name = focus_stats.index[0][1]
+    plot_df = posterior_df[
+        (posterior_df["season"] == focus_season) & (posterior_df["celebrity_name"] == focus_name)
+    ].sort_values("week")
+    if not plot_df.empty:
+        fig, ax = plt.subplots(figsize=(6.4, 3.6))
+        ax.fill_between(
+            plot_df["week"],
+            plot_df["hdi_lower"],
+            plot_df["hdi_upper"],
+            color=COLOR_PRIMARY,
+            alpha=0.20,
+            label="95% HDI",
+        )
+        ax.plot(
+            plot_df["week"],
+            plot_df["true_fan_share"],
+            color=COLOR_WARNING,
+            marker="o",
+            label="True fan share",
+        )
+        ax.plot(
+            plot_df["week"],
+            plot_df["fan_share_mean"],
+            color=COLOR_PRIMARY_DARK,
+            linestyle="--",
+            label="Posterior mean",
+        )
+        ax.set_xlabel("Week")
+        ax.set_ylabel("Fan vote share")
+        ax.set_title(f"Synthetic validation (Season {focus_season}, {focus_name})")
+        ax.set_ylim(0, min(1.0, float(plot_df["hdi_upper"].max()) * 1.15))
+        ax.legend(frameon=False, fontsize=8)
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_synthetic_validation.pdf")
+        plt.close(fig)
+
+    log(f"Synthetic validation coverage: {coverage:.3f}")
+    return summary
+
+
+def render_dashboard_concept() -> None:
+    """绘制制片人仪表盘概念图（用于论文展示）。"""
+    fig, ax = plt.subplots(figsize=(7.2, 4.2))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    # 背景面板
+    panel = FancyBboxPatch(
+        (0.02, 0.06),
+        0.96,
+        0.88,
+        boxstyle="round,pad=0.012,rounding_size=0.02",
+        facecolor="#F7F7F2",
+        edgecolor=COLOR_LIGHT_GRAY,
+        linewidth=1.0,
+    )
+    ax.add_patch(panel)
+    ax.text(0.05, 0.92, "Producer Dashboard", fontsize=12, fontweight="bold", color=COLOR_PRIMARY_DARK)
+
+    # 状态区
+    status_box = FancyBboxPatch(
+        (0.05, 0.18),
+        0.25,
+        0.65,
+        boxstyle="round,pad=0.012,rounding_size=0.02",
+        facecolor="white",
+        edgecolor=COLOR_LIGHT_GRAY,
+        linewidth=1.0,
+    )
+    ax.add_patch(status_box)
+    ax.text(0.07, 0.79, "Status", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    lights = [("Green", "#7FBF7B"), ("Yellow", "#F1C232"), ("Red", COLOR_WARNING)]
+    y_pos = [0.67, 0.55, 0.43]
+    for (label, color), y in zip(lights, y_pos):
+        active = (label == "Yellow")
+        face = color if active else "#DDDDDD"
+        circle = Circle((0.11, y), 0.035, facecolor=face, edgecolor="#666666", linewidth=1.0)
+        ax.add_patch(circle)
+    ax.text(0.19, 0.55, "Tier 2 Active", fontsize=9, color=COLOR_WARNING, fontweight="bold")
+    ax.text(0.08, 0.28, "Risk Index: U_t=0.46", fontsize=8, color=COLOR_GRAY)
+
+    # 审计区
+    audit_box = FancyBboxPatch(
+        (0.33, 0.18),
+        0.38,
+        0.65,
+        boxstyle="round,pad=0.012,rounding_size=0.02",
+        facecolor="white",
+        edgecolor=COLOR_LIGHT_GRAY,
+        linewidth=1.0,
+    )
+    ax.add_patch(audit_box)
+    ax.text(0.35, 0.79, "Audit Window (HDI)", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    for i in range(5):
+        y = 0.69 - i * 0.11
+        ax.add_line(plt.Line2D([0.36, 0.68], [y, y], color="#CCCCCC", linewidth=3))
+        band_x = 0.43 + 0.03 * (i % 2)
+        band_w = 0.12 + 0.02 * (i % 3)
+        ax.add_patch(Rectangle((band_x, y - 0.015), band_w, 0.03, facecolor=COLOR_PRIMARY, alpha=0.35, edgecolor="none"))
+        if i == 1:
+            ax.add_patch(Rectangle((band_x, y - 0.018), band_w, 0.036, facecolor="none", edgecolor=COLOR_WARNING, linewidth=1.1))
+            ax.text(0.56, y + 0.025, "High Risk", fontsize=7, color=COLOR_WARNING)
+
+    # 建议区
+    rec_box = FancyBboxPatch(
+        (0.73, 0.18),
+        0.22,
+        0.65,
+        boxstyle="round,pad=0.012,rounding_size=0.02",
+        facecolor="white",
+        edgecolor=COLOR_LIGHT_GRAY,
+        linewidth=1.0,
+    )
+    ax.add_patch(rec_box)
+    ax.text(0.75, 0.79, "Recommendation", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    rec_callout = FancyBboxPatch(
+        (0.75, 0.50),
+        0.18,
+        0.18,
+        boxstyle="round,pad=0.01,rounding_size=0.02",
+        facecolor="#FFF3CD",
+        edgecolor=COLOR_WARNING,
+        linewidth=1.0,
+    )
+    ax.add_patch(rec_callout)
+    ax.text(0.84, 0.59, "Activate\nJudge Save", ha="center", va="center", fontsize=9, fontweight="bold", color=COLOR_WARNING)
+    ax.text(0.75, 0.32, "Flag: Contestant B", fontsize=8, color=COLOR_WARNING)
+
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_dashboard_concept.pdf")
     plt.close(fig)
 
 
@@ -740,6 +1026,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     posterior_df = pd.DataFrame(posterior_records)
     week_metrics_df = pd.DataFrame(week_metrics)
     log(f"Posterior rows: {len(posterior_df)}, Week metrics: {len(week_metrics_df)}")
+    season_max_week = week_metrics_df.groupby("season")["week"].max().to_dict()
 
     u_series = week_metrics_df["mean_hdi_width"].dropna()
     if u_series.empty:
@@ -750,6 +1037,26 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         u_p97 = float(u_series.quantile(DAWS_U_P97))
         if u_p97 < u_p90:
             u_p97 = u_p90
+
+    # DAWS 档位输出（供 Dashboard 使用）
+    if save_outputs and not week_metrics_df.empty:
+        tier_records = []
+        for _, row in week_metrics_df.iterrows():
+            mean_width = float(row["mean_hdi_width"])
+            if np.isnan(mean_width):
+                mean_width = 0.0
+            season = int(row["season"])
+            week = int(row["week"])
+            final_week = int(season_max_week.get(season, week))
+            tier_label, action = determine_daws_tier(mean_width, week, final_week)
+            tier_records.append({
+                "Season": season,
+                "Week": week,
+                "Risk_Score": mean_width,
+                "Tier_Label": tier_label,
+                "Action": action,
+            })
+        pd.DataFrame(tier_records).to_csv(OUTPUT_DIR / "daws_tiers.csv", index=False, encoding="utf-8")
 
     # HDI 分布图
     hdi_series = week_metrics_df["mean_hdi_width"].dropna()
@@ -905,10 +1212,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     # 季节级指标收集（用于分布图）
     season_metrics_list: List[Dict[str, Any]] = []
 
-    # DAWS参数（分段阈值权重）
-    alpha_base = DAWS_ALPHA_BASE
-    alpha_dispute = DAWS_ALPHA_DISPUTE
-    alpha_extreme = DAWS_ALPHA_EXTREME
+    # DAWS 固定权重（Green 档位）
+    alpha_t = ALPHA_PERCENT
 
     for (season, week), wdf in season_week_groups:
         active_df = wdf[wdf["active"]].copy()
@@ -926,9 +1231,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         mean_width = week_metrics_df[(week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)]["mean_hdi_width"].mean()
         if np.isnan(mean_width):
             mean_width = 0.0
-        alpha_t = compute_alpha_t(mean_width, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
+        final_week = int(season_max_week.get(int(season), int(week)))
+        daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week)
 
-        eval_res = evaluate_mechanisms(samples, active_df, alpha_t, EPSILON, RNG)
+        eval_res = evaluate_mechanisms(samples, active_df, alpha_t, daws_tier, EPSILON, RNG)
         if not eval_res:
             continue
         m = eval_res["count"]
@@ -1058,10 +1364,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             mean_width = week_metrics_df[(week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)]["mean_hdi_width"].mean()
             if np.isnan(mean_width):
                 mean_width = 0.0
-            alpha_t = compute_alpha_t(mean_width, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
+            final_week = int(season_max_week.get(int(season), int(week)))
+            daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week)
 
-            res_fast = evaluate_mechanisms(fast_samples, active_df, alpha_t, EPSILON, rng)
-            res_strict = evaluate_mechanisms(strict_samples, active_df, alpha_t, EPSILON, rng)
+            res_fast = evaluate_mechanisms(fast_samples, active_df, ALPHA_PERCENT, daws_tier, EPSILON, rng)
+            res_strict = evaluate_mechanisms(strict_samples, active_df, ALPHA_PERCENT, daws_tier, EPSILON, rng)
 
             for key in ["percent", "rank", "daws"]:
                 metrics_fast[key]["fairness_sum"] += res_fast[key]["fairness"] * res_fast["count"]
@@ -1352,27 +1659,35 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     week_u = week_metrics_df.groupby("week")["mean_hdi_width"].mean().reset_index()
     if not week_u.empty:
         week_u = week_u.sort_values("week")
-        alpha_schedule = week_u["mean_hdi_width"].apply(
-            lambda u: compute_alpha_t(u, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
-        ).to_numpy()
+        max_week_all = int(week_u["week"].max())
+        tier_map = {"Green": 1, "Yellow": 2, "Red": 3}
+        tiers = []
+        for _, row in week_u.iterrows():
+            mean_width = float(row["mean_hdi_width"])
+            if np.isnan(mean_width):
+                mean_width = 0.0
+            tier_label, _ = determine_daws_tier(mean_width, int(row["week"]), max_week_all)
+            tiers.append(tier_map[tier_label])
         fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.6), sharex=True)
         axes[0].plot(week_u["week"], week_u["mean_hdi_width"], marker="o", color=COLOR_PRIMARY)
-        if u_p90 > 0:
-            axes[0].axhline(u_p90, color=COLOR_ACCENT, linestyle="--", linewidth=1.0, label="P90 threshold")
-        if u_p97 > 0:
-            axes[0].axhline(u_p97, color=COLOR_WARNING, linestyle="--", linewidth=1.0, label="P97 threshold")
+        axes[0].axhline(DAWS_RISK_THRESHOLD, color=COLOR_ACCENT, linestyle="--", linewidth=1.0, label="Risk threshold")
         axes[0].set_ylabel("U_t (mean HDI width)")
-        axes[0].set_title("DAWS trigger: uncertainty and tiered judge weight")
+        axes[0].set_title("DAWS trigger: risk control tiers")
         axes[0].legend(frameon=False, fontsize=8, loc="upper right")
 
-        axes[1].step(week_u["week"], alpha_schedule, where="mid", color=COLOR_PRIMARY_DARK, linewidth=1.6)
-        axes[1].set_ylabel("Alpha_t (judge weight)")
+        axes[1].step(week_u["week"], tiers, where="mid", color=COLOR_PRIMARY_DARK, linewidth=1.6)
+        axes[1].set_ylabel("Tier")
         axes[1].set_xlabel("Week")
-        axes[1].set_ylim(0.45, 0.75)
-        axes[1].set_yticks(sorted(set([alpha_base, alpha_dispute, alpha_extreme])))
+        axes[1].set_ylim(0.7, 3.3)
+        axes[1].set_yticks([1, 2, 3])
+        axes[1].set_yticklabels(["Green", "Yellow", "Red"])
         plt.tight_layout()
         plt.savefig(FIG_DIR / "fig_daws_trigger.pdf")
         plt.close(fig)
+
+    # Dashboard 概念图
+    log("Rendering dashboard concept...")
+    render_dashboard_concept()
 
     # Mechanism radar
     def radar_plot(stats_dict: Dict[str, Dict[str, float]], labels: List[str], fname: str) -> None:
@@ -1433,7 +1748,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 samples_cache[key] = samples
             if len(samples) == 0:
                 continue
-            res = evaluate_mechanisms(samples, active_df, alpha, EPSILON, RNG)
+            res = evaluate_mechanisms(samples, active_df, alpha, "Green", EPSILON, RNG)
             m = res["count"]
             totals["agency_sum"] += res["daws"]["agency"] * m
             totals["instability_sum"] += res["daws"]["instability"] * m
@@ -1621,7 +1936,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     # =========================
     log("Rendering counterfactual risk timelines...")
 
-    def compute_elim_probs(samples_arr: np.ndarray, active_df: pd.DataFrame, alpha_t: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def compute_elim_probs(samples_arr: np.ndarray, active_df: pd.DataFrame, daws_tier: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         m = len(samples_arr)
         n = len(active_df)
         if m == 0 or n == 0:
@@ -1657,9 +1972,15 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 prob_s[i] += (1 - p_elim_a[mask_b]).sum()
         prob_s = prob_s / m
 
-        comb_daws = alpha_t * j_share_matrix + (1 - alpha_t) * samples_arr
-        elim_d = np.argmin(comb_daws, axis=1)
-        prob_d = np.bincount(elim_d, minlength=n) / m
+        elim_f = np.argmin(samples_arr, axis=1)
+        prob_f = np.bincount(elim_f, minlength=n) / m
+
+        if daws_tier == "Red":
+            prob_d = prob_f
+        elif daws_tier == "Yellow":
+            prob_d = prob_s
+        else:
+            prob_d = prob_p
 
         return prob_p, prob_r, prob_s, prob_d
 
@@ -1696,9 +2017,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             ]["mean_hdi_width"].mean()
             if np.isnan(mean_width):
                 mean_width = 0.0
-            alpha_t = compute_alpha_t(mean_width, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
+            final_week = int(season_max_week.get(int(season), int(week)))
+            daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week)
 
-            prob_p, prob_r, prob_s, prob_d = compute_elim_probs(samples_use, active_df, alpha_t)
+            prob_p, prob_r, prob_s, prob_d = compute_elim_probs(samples_use, active_df, daws_tier)
             risk_records.extend([
                 {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Percent", "prob": float(prob_p[c_idx])},
                 {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Rank", "prob": float(prob_r[c_idx])},
@@ -1756,7 +2078,17 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             f_rank = (-v_share).argsort().argsort() + 1
             combined = -(j_rank + f_rank)
         else:
-            combined = 0.6 * j_share + 0.4 * v_share
+            mean_width = week_metrics_df[
+                (week_metrics_df["season"] == season) & (week_metrics_df["week"] == last_week)
+            ]["mean_hdi_width"].mean()
+            if np.isnan(mean_width):
+                mean_width = 0.0
+            final_week = int(season_max_week.get(int(season), int(last_week)))
+            daws_tier, _ = determine_daws_tier(mean_width, int(last_week), final_week)
+            if daws_tier == "Red":
+                combined = v_share
+            else:
+                combined = 0.5 * j_share + 0.5 * v_share
         idx = np.argsort(-combined)[:3]
         return wk.iloc[idx]["celebrity_name"].tolist()
 
@@ -1793,8 +2125,13 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             if not elim_idx:
                 continue
             weeks_count += 1
-            j_share = wk["judge_share"].to_numpy()
-            v_share = wk["fan_share_mean"].to_numpy()
+            aligned = active_df[["celebrity_name", "judge_share", "judge_total"]].merge(
+                wk[["celebrity_name", "fan_share_mean"]],
+                on="celebrity_name",
+                how="left",
+            )
+            j_share = aligned["judge_share"].to_numpy()
+            v_share = aligned["fan_share_mean"].to_numpy()
             if mechanism == "percent":
                 combined = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
                 elim_pred = int(np.argmin(combined))
@@ -1803,14 +2140,31 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 f_rank = (-v_share).argsort().argsort() + 1
                 elim_pred = int(np.argmax(j_rank + f_rank))
             else:
+                j_scores = aligned["judge_total"].to_numpy()
                 mean_width = week_metrics_df[
                     (week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)
                 ]["mean_hdi_width"].mean()
                 if np.isnan(mean_width):
                     mean_width = 0.0
-                alpha_t = compute_alpha_t(mean_width, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
-                combined = alpha_t * j_share + (1 - alpha_t) * v_share
-                elim_pred = int(np.argmin(combined))
+                final_week = int(season_max_week.get(int(season), int(week)))
+                daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week)
+                if daws_tier == "Red":
+                    elim_pred = int(np.argmin(v_share))
+                elif daws_tier == "Yellow":
+                    j_rank = pd.Series(j_share).rank(ascending=False, method="average").to_numpy()
+                    f_rank = (-v_share).argsort().argsort() + 1
+                    comb_rank = j_rank + f_rank
+                    bottom_two = np.argsort(comb_rank)[-2:]
+                    if len(bottom_two) < 2:
+                        elim_pred = int(np.argmax(comb_rank))
+                    else:
+                        a, b = int(bottom_two[0]), int(bottom_two[1])
+                        diff = j_scores[b] - j_scores[a]
+                        p_elim_a = 1 / (1 + math.exp(JUDGESAVE_BETA * diff))
+                        elim_pred = a if p_elim_a >= 0.5 else b
+                else:
+                    combined = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
+                    elim_pred = int(np.argmin(combined))
             if elim_pred not in elim_idx:
                 elim_mismatch += 1
 
@@ -1965,15 +2319,21 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
 
 if __name__ == "__main__":
-    scales = parse_scales(os.getenv("MCM_SCALES"))
-    if scales:
-        results = []
-        max_scale = max(scales)
-        for scale in scales:
-            log(f"Running scale experiment: {scale}")
-            summary = run_pipeline(n_props=scale, record_benchmark=True, save_outputs=(scale == max_scale))
-            results.append(summary)
-        if (FIG_DIR / "fig_scale_benchmark.pdf").exists():
-            log("Scale benchmark figure updated.")
+    if RUN_SYNTHETIC_ONLY:
+        synthetic_data_validation()
     else:
-        run_pipeline(n_props=N_PROPOSALS, record_benchmark=True, save_outputs=True)
+        scales = parse_scales(os.getenv("MCM_SCALES"))
+        if scales:
+            results = []
+            max_scale = max(scales)
+            for scale in scales:
+                log(f"Running scale experiment: {scale}")
+                summary = run_pipeline(n_props=scale, record_benchmark=True, save_outputs=(scale == max_scale))
+                results.append(summary)
+            if (FIG_DIR / "fig_scale_benchmark.pdf").exists():
+                log("Scale benchmark figure updated.")
+        else:
+            run_pipeline(n_props=N_PROPOSALS, record_benchmark=True, save_outputs=True)
+
+        if RUN_SYNTHETIC_VALIDATION:
+            synthetic_data_validation()
