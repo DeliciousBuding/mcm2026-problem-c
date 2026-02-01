@@ -259,7 +259,7 @@ Metrics (higher is better unless noted):
 \keyoutput{A shared metric interface allows direct comparison across mechanisms.}
 
 \begin{takeawaybox}
-\textbf{Methodology Alignment Box.} Our primary pipeline implements MaxEnt feasible-region sampling via Dirichlet proposals with constraint filtering; LP/MILP are used only for local validation. Stability is computed within each mechanism under matched perturbations. DAWS uses a public three-tier risk protocol based on $U_t$ with publishable quantile thresholds (P75/P90) and a final-week Red override; the judge-save curve uses a calibrated $\beta=4.0$ for illustration.
+\textbf{Methodology Alignment Box.} Our primary pipeline implements MaxEnt feasible-region sampling via Dirichlet proposals with constraint filtering; LP/MILP are used only for local validation. Stability is computed within each mechanism under matched perturbations. DAWS uses a public three-tier risk protocol based on $U_t$ with publishable quantile thresholds (P80/P90) and a final-week Red override; the judge-save curve uses a calibrated $\beta=2.0$ for illustration.
 \end{takeawaybox}
 
 \section{Model A: Feasible-Region Audit}
@@ -472,8 +472,8 @@ We place the GBDT robustness check in Appendix~\ref{app:auc}; it supports covari
 \takeaway{DAWS is a three-tier risk-control protocol with explicit actions.}
 We define the risk index as $R_t=U_t$ (weekly uncertainty via mean HDI width) and apply a discrete protocol:
 \begin{itemize}[leftmargin=2em]
-\item \textbf{Tier 1 (Green).} $R_t<Q_{0.75}$ \;\;$\Rightarrow$ standard 50/50 percent rule.
-\item \textbf{Tier 2 (Yellow).} $Q_{0.75}\le R_t<Q_{0.90}$ \;\;$\Rightarrow$ activate judge-save (bottom-two + save).
+\item \textbf{Tier 1 (Green).} $R_t<Q_{0.80}$ \;\;$\Rightarrow$ standard 50/50 percent rule.
+\item \textbf{Tier 2 (Yellow).} $Q_{0.80}\le R_t<Q_{0.90}$ \;\;$\Rightarrow$ activate judge-save (bottom-two + save).
 \item \textbf{Tier 3 (Red).} $R_t\ge Q_{0.90}$ or Final week \;\;$\Rightarrow$ 100\% audience vote.
 \end{itemize}
 Thresholds are quantile-based and publishable, making the policy transparent and executable.
@@ -481,7 +481,7 @@ Figure~\ref{fig:daws-trigger} shows the resulting tier schedule.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
-\caption{DAWS trigger schedule: weekly uncertainty $U_t$, with dashed lines marking the P75/P90 thresholds and the resulting tier (Green/Yellow/Red).}
+\caption{DAWS trigger schedule: weekly uncertainty $U_t$, with dashed lines marking the P80/P90 thresholds and the resulting tier (Green/Yellow/Red).}
 \label{fig:daws-trigger}
 \end{figure}
 We also provide a producer-facing dashboard concept for operational use (Fig.~\ref{fig:dashboard-concept}).
@@ -503,13 +503,13 @@ We use a calibrated $\beta$ in
 \begin{equation}
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
 \end{equation}
-In the Yellow risk tier, we treat judges as decisive gatekeepers and set $\beta=4.0$ to reflect a stronger corrective intent against popularity bias.
+In the Yellow risk tier, we treat judges as corrective gatekeepers and set $\beta=2.0$ to reflect a calibrated response against popularity bias.
 
 % Judge-save 决策曲线
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
-\caption{Judges prefer higher score within the bottom two; the curve uses calibrated $\beta=4.0$ to illustrate sharper decisions in Yellow-tier weeks.}
+\caption{Judges prefer higher score within the bottom two; the curve uses calibrated $\beta=2.0$ to illustrate the Yellow-tier decision sensitivity.}
 \end{figure}
 
 \keyoutput{DAWS tier protocol and calibrated judge-save behavior.}
@@ -564,11 +564,11 @@ We present the smoothness parameter sensitivity analysis here. Key conclusions r
 \end{figure}
 
 \subsection{DAWS Parameter Scan}
-We scan the DAWS trigger quantiles and base weight to map the design space. The sweep suggests a theoretical optimum at higher trigger thresholds (e.g., $P_{90}\approx0.95$), but we deliberately choose a more active setting ($P_{90}=0.75$) so the risk-control protocol intervenes in a meaningful share of weeks. This choice favors operational visibility over marginal score gains.
+We scan the DAWS trigger quantiles and base weight to map the design space, and enforce an activation-rate constraint (20--35\%) to avoid a passive policy. The constrained optimum selects $P_{90}=0.80$, $P_{97}=0.90$, $\alpha_{\text{base}}=0.60$, and $\beta=2.0$, yielding a 20.3\% activation rate while balancing integrity and agency. This choice favors operational visibility over marginal score gains.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.85\linewidth]{figures/fig_param_optimization.pdf}
-\caption{DAWS design space exploration. The heatmap reports the composite utility score (integrity + agency + stability) across trigger quantiles and base weights.}
+\caption{DAWS design space exploration. The heatmap reports the composite utility score (integrity + agency + stability) across trigger quantiles and base weights (max over $\beta$).}
 \label{fig:param-optimization}
 \end{figure}
 

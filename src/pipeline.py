@@ -60,12 +60,12 @@ RUN_SYNTHETIC_ONLY = os.getenv("MCM_SYNTHETIC_ONLY", "0") != "0"  # 是否仅运
 RUN_DAWS_GRID = os.getenv("MCM_DAWS_GRID", "0") != "0"  # Whether to run DAWS grid search
 
 # DAWS 分段阈值与权重（强调可公开、可执行）
-DAWS_ALPHA_BASE = 0.50
+DAWS_ALPHA_BASE = 0.60
 DAWS_ALPHA_DISPUTE = 0.60
 DAWS_ALPHA_EXTREME = 0.30
-DAWS_U_P90 = 0.75
+DAWS_U_P90 = 0.80
 DAWS_U_P97 = 0.90
-JUDGESAVE_BETA = 4.0
+JUDGESAVE_BETA = 2.0
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
@@ -2339,8 +2339,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 # =========================
 
 def run_parameter_grid_search() -> None:
-    """Grid search DAWS thresholds and base weight."""
-    log("Running DAWS Parameter Grid Search...")
+    """Grid search DAWS thresholds with activation constraint."""
+    log("Running DAWS Parameter Grid Search with Activity Constraint...")
     ensure_dirs()
     set_plot_style()
 
@@ -2377,72 +2377,92 @@ def run_parameter_grid_search() -> None:
         return
 
     all_hdis = pd.Series(list(week_metrics_cache.values()))
-    p90_quantiles = np.linspace(0.60, 0.95, 8)
-    alpha_base_range = [0.35, 0.40, 0.45, 0.50]
+    p90_quantiles = np.linspace(0.65, 0.95, 7)
+    alpha_base_range = [0.40, 0.45, 0.50, 0.55, 0.60]
+    beta_range = [2.0, 3.0, 4.0]
 
     results: List[Dict[str, float]] = []
-    log(f"Starting grid search: {len(p90_quantiles)} x {len(alpha_base_range)} combinations...")
+    total_weeks = len(samples_cache)
+    log(f"Grid: {len(p90_quantiles)}x{len(alpha_base_range)}x{len(beta_range)} combinations.")
+
+    global JUDGESAVE_BETA
+    orig_beta = JUDGESAVE_BETA
 
     for q90 in p90_quantiles:
         for a_base in alpha_base_range:
-            thresh_p90 = float(all_hdis.quantile(q90))
-            q97 = min(0.99, q90 + (1 - q90) * 0.5)
-            thresh_p97 = float(all_hdis.quantile(q97))
-            if thresh_p97 < thresh_p90:
-                thresh_p97 = thresh_p90
+            for beta in beta_range:
+                thresh_p90 = float(all_hdis.quantile(q90))
+                q97 = min(0.99, q90 + (1 - q90) * 0.5)
+                thresh_p97 = float(all_hdis.quantile(q97))
+                if thresh_p97 < thresh_p90:
+                    thresh_p97 = thresh_p90
 
-            metrics_sum = {"agency": 0.0, "integrity": 0.0, "stability": 0.0, "count": 0}
-            for (season, week), wdf in season_week_groups:
-                key = (int(season), int(week))
-                if key not in samples_cache:
-                    continue
-                mean_width = week_metrics_cache[key]
-                samples = samples_cache[key]
-                active_df = wdf[wdf["active"]].copy()
-                final_week = int(season_max_week.get(int(season), int(week)))
-                daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, thresh_p90, thresh_p97)
-                res = evaluate_mechanisms(samples, active_df, a_base, daws_tier, EPSILON, RNG)
-                if not res:
-                    continue
-                m = res["count"]
-                metrics_sum["agency"] += res["daws"]["agency"] * m
-                metrics_sum["integrity"] += res["daws"]["judge_integrity"] * m
-                metrics_sum["stability"] += (1.0 - res["daws"]["instability"]) * m
-                metrics_sum["count"] += m
+                metrics_sum = {"agency": 0.0, "integrity": 0.0, "stability": 0.0, "count": 0}
+                trigger_count = 0
 
-            if metrics_sum["count"] > 0:
-                n = metrics_sum["count"]
-                score_agency = metrics_sum["agency"] / n
-                score_integrity = metrics_sum["integrity"] / n
-                score_stability = metrics_sum["stability"] / n
-                final_score = 0.4 * score_integrity + 0.4 * score_agency + 0.2 * score_stability
-                results.append({
-                    "q90": float(q90),
-                    "q97": float(q97),
-                    "alpha_base": float(a_base),
-                    "score": float(final_score),
-                    "integrity": float(score_integrity),
-                    "agency": float(score_agency),
-                    "stability": float(score_stability),
-                })
+                JUDGESAVE_BETA = beta
+
+                for (season, week), wdf in season_week_groups:
+                    key = (int(season), int(week))
+                    if key not in samples_cache:
+                        continue
+                    mean_width = week_metrics_cache[key]
+                    samples = samples_cache[key]
+                    active_df = wdf[wdf["active"]].copy()
+                    final_week = int(season_max_week.get(int(season), int(week)))
+                    daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, thresh_p90, thresh_p97)
+                    if daws_tier != "Green":
+                        trigger_count += 1
+                    res = evaluate_mechanisms(samples, active_df, a_base, daws_tier, EPSILON, RNG)
+                    if not res:
+                        continue
+                    m = res["count"]
+                    metrics_sum["agency"] += res["daws"]["agency"] * m
+                    metrics_sum["integrity"] += res["daws"]["judge_integrity"] * m
+                    metrics_sum["stability"] += (1.0 - res["daws"]["instability"]) * m
+                    metrics_sum["count"] += m
+
+                if metrics_sum["count"] > 0:
+                    n = metrics_sum["count"]
+                    score_agency = metrics_sum["agency"] / n
+                    score_integrity = metrics_sum["integrity"] / n
+                    score_stability = metrics_sum["stability"] / n
+                    activation_rate = trigger_count / total_weeks if total_weeks else 0.0
+                    score = 0.4 * score_integrity + 0.4 * score_agency + 0.2 * score_stability
+                    results.append({
+                        "q90": float(q90),
+                        "q97": float(q97),
+                        "alpha": float(a_base),
+                        "beta": float(beta),
+                        "activation": float(activation_rate),
+                        "score": float(score),
+                        "integrity": float(score_integrity),
+                        "agency": float(score_agency),
+                        "stability": float(score_stability),
+                    })
+
+    JUDGESAVE_BETA = orig_beta
 
     res_df = pd.DataFrame(results)
     if res_df.empty:
         log("Grid search finished: no results.")
         return
 
-    best_row = res_df.loc[res_df["score"].idxmax()]
-    log("\n" + "=" * 40)
-    log("OPTIMAL PARAMETERS FOUND:")
-    log(f"Best P90 Quantile: {best_row['q90']:.2f}")
-    log(f"Best Base Alpha:   {best_row['alpha_base']:.2f}")
-    log(f"Resulting Metrics -> Integrity: {best_row['integrity']:.3f}, Agency: {best_row['agency']:.3f}, Stability: {best_row['stability']:.3f}")
-    log("=" * 40 + "\n")
+    res_df.to_csv(OUTPUT_DIR / "grid_search_full.csv", index=False, encoding="utf-8")
 
-    res_df.to_csv(OUTPUT_DIR / "grid_search_results.csv", index=False, encoding="utf-8")
+    valid_df = res_df[(res_df["activation"] >= 0.20) & (res_df["activation"] <= 0.35)]
+    if valid_df.empty:
+        log("No parameters met the activation constraints.")
+    else:
+        best = valid_df.loc[valid_df["score"].idxmax()]
+        log("\n=== CONSTRAINED OPTIMAL FOUND ===")
+        log(f"Constraints: 20% < Activation ({best['activation']:.1%}) < 35%")
+        log(f"Parameters: P90={best['q90']:.2f}, Alpha={best['alpha']:.2f}, Beta={best['beta']:.1f}")
+        log(f"Metrics: Int={best['integrity']:.3f}, Agn={best['agency']:.3f}, Stb={best['stability']:.3f}")
+        best.to_frame().T.to_csv(OUTPUT_DIR / "optimal_params.csv", index=False)
 
     try:
-        pivot = res_df.pivot(index="alpha_base", columns="q90", values="score")
+        pivot = res_df.groupby(["alpha", "q90"])["score"].max().unstack("q90")
         plt.figure(figsize=(6, 4.5))
         sns.heatmap(pivot, annot=True, fmt=".3f", cmap="viridis")
         plt.title("Parameter Optimization: DAWS Score Surface")
@@ -2454,7 +2474,6 @@ def run_parameter_grid_search() -> None:
         log("Optimization heatmap saved.")
     except Exception as exc:
         log(f"Could not plot heatmap: {exc}")
-
 if __name__ == "__main__":
     if RUN_SYNTHETIC_ONLY:
         synthetic_data_validation()
