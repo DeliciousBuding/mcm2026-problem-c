@@ -60,12 +60,12 @@ RUN_SYNTHETIC_ONLY = os.getenv("MCM_SYNTHETIC_ONLY", "0") != "0"  # 是否仅运
 RUN_DAWS_GRID = os.getenv("MCM_DAWS_GRID", "0") != "0"  # Whether to run DAWS grid search
 
 # DAWS 分段阈值与权重（强调可公开、可执行）
-DAWS_ALPHA_BASE = 0.65
-DAWS_ALPHA_DISPUTE = 0.60
-DAWS_ALPHA_EXTREME = 0.30
-DAWS_U_P90 = 0.80
-DAWS_U_P97 = 0.90
-JUDGESAVE_BETA = 4.0
+DAWS_ALPHA_BASE = 0.50
+DAWS_ALPHA_DISPUTE = 0.50
+DAWS_ALPHA_EXTREME = 0.50
+DAWS_U_P90 = 0.85
+DAWS_U_P97 = 0.95
+JUDGESAVE_BETA = 6.0
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
@@ -290,6 +290,11 @@ def determine_daws_tier(
     return "Green", "Standard 50/50"
 
 
+def determine_daws_eval_tier(week: int, final_week: int) -> str:
+    """DAWS evaluation tier: conflict-triggered, only finale forces Red."""
+    return "Red" if week >= final_week else "Green"
+
+
 def apply_percent_mask(
     proposals: np.ndarray,
     j_share: np.ndarray,
@@ -361,13 +366,18 @@ def evaluate_mechanisms(
     rand_u = rng.random(m)
     elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
 
+    conflict_mask = elim_p != elim_r
     if daws_tier == "Red":
         elim_d = np.argmin(samples, axis=1)
-    elif daws_tier == "Yellow":
-        elim_d = elim_s
     else:
-        comb_daws = alpha_t * j_share_matrix + (1 - alpha_t) * samples
-        elim_d = np.argmin(comb_daws, axis=1)
+        elim_d = elim_p.copy()
+        if np.any(conflict_mask):
+            c1 = elim_p[conflict_mask]
+            c2 = elim_r[conflict_mask]
+            diff_c = j_scores[c2] - j_scores[c1]
+            p_elim_c1 = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_c))
+            rand_c = rng.random(np.sum(conflict_mask))
+            elim_d[conflict_mask] = np.where(rand_c < p_elim_c1, c1, c2)
 
     n = len(j_rank)
     if n < 2:
@@ -425,11 +435,16 @@ def evaluate_mechanisms(
 
     if daws_tier == "Red":
         elim_noise_d = np.argmin(v_noise, axis=1)
-    elif daws_tier == "Yellow":
-        elim_noise_d = elim_noise_s
     else:
-        comb_daws_noise = alpha_t * j_share_matrix + (1 - alpha_t) * v_noise
-        elim_noise_d = np.argmin(comb_daws_noise, axis=1)
+        elim_noise_d = elim_noise_p.copy()
+        conflict_noise = elim_noise_p != elim_noise_r
+        if np.any(conflict_noise):
+            c1_n = elim_noise_p[conflict_noise]
+            c2_n = elim_noise_r[conflict_noise]
+            diff_cn = j_scores[c2_n] - j_scores[c1_n]
+            p_elim_c1n = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_cn))
+            rand_cn = rng.random(np.sum(conflict_noise))
+            elim_noise_d[conflict_noise] = np.where(rand_cn < p_elim_c1n, c1_n, c2_n)
 
     instability_p = np.mean(elim_p != elim_noise_p)
     instability_r = np.mean(elim_r != elim_noise_r)
@@ -441,7 +456,7 @@ def evaluate_mechanisms(
         "rank": {"fairness": tau_mean, "agency": agency_r, "instability": instability_r, "judge_integrity": integrity_r},
         "save": {"fairness": tau_mean, "agency": agency_s, "instability": instability_s, "judge_integrity": integrity_s},
         "daws": {"fairness": tau_mean, "agency": agency_d, "instability": instability_d, "judge_integrity": integrity_d},
-        "flip_sum": float(np.sum(elim_p != elim_r)),
+        "flip_sum": float(np.sum(conflict_mask)),
         "count": m,
     }
 
@@ -1242,9 +1257,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         if np.isnan(mean_width):
             mean_width = 0.0
         final_week = int(season_max_week.get(int(season), int(week)))
-        daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, u_p90, u_p97)
+        eval_tier = determine_daws_eval_tier(int(week), final_week)
 
-        eval_res = evaluate_mechanisms(samples, active_df, alpha_t, daws_tier, EPSILON, RNG)
+        eval_res = evaluate_mechanisms(samples, active_df, alpha_t, eval_tier, EPSILON, RNG)
         if not eval_res:
             continue
         m = eval_res["count"]
@@ -1375,10 +1390,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             if np.isnan(mean_width):
                 mean_width = 0.0
             final_week = int(season_max_week.get(int(season), int(week)))
-            daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, u_p90, u_p97)
+            eval_tier = determine_daws_eval_tier(int(week), final_week)
 
-            res_fast = evaluate_mechanisms(fast_samples, active_df, DAWS_ALPHA_BASE, daws_tier, EPSILON, rng)
-            res_strict = evaluate_mechanisms(strict_samples, active_df, DAWS_ALPHA_BASE, daws_tier, EPSILON, rng)
+            res_fast = evaluate_mechanisms(fast_samples, active_df, DAWS_ALPHA_BASE, eval_tier, EPSILON, rng)
+            res_strict = evaluate_mechanisms(strict_samples, active_df, DAWS_ALPHA_BASE, eval_tier, EPSILON, rng)
 
             for key in ["percent", "rank", "daws"]:
                 metrics_fast[key]["fairness_sum"] += res_fast[key]["fairness"] * res_fast["count"]
@@ -1986,16 +2001,21 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         elim_f = np.argmin(samples_arr, axis=1)
         prob_f = np.bincount(elim_f, minlength=n) / m
 
-        comb_daws = DAWS_ALPHA_BASE * j_share_matrix + (1 - DAWS_ALPHA_BASE) * samples_arr
-        elim_d_green = np.argmin(comb_daws, axis=1)
-        prob_d_green = np.bincount(elim_d_green, minlength=n) / m
-
+        conflict_mask = elim_p != elim_r
         if daws_tier == "Red":
             prob_d = prob_f
-        elif daws_tier == "Yellow":
-            prob_d = prob_s
         else:
-            prob_d = prob_d_green
+            prob_d = np.zeros(n)
+            if np.any(~conflict_mask):
+                prob_d += np.bincount(elim_p[~conflict_mask], minlength=n)
+            if np.any(conflict_mask):
+                c1 = elim_p[conflict_mask]
+                c2 = elim_r[conflict_mask]
+                diff_c = j_scores[c2] - j_scores[c1]
+                p_elim_c1 = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_c))
+                np.add.at(prob_d, c1, p_elim_c1)
+                np.add.at(prob_d, c2, 1 - p_elim_c1)
+            prob_d = prob_d / m
 
         return prob_p, prob_r, prob_s, prob_d
 
@@ -2033,9 +2053,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             if np.isnan(mean_width):
                 mean_width = 0.0
             final_week = int(season_max_week.get(int(season), int(week)))
-            daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, u_p90, u_p97)
+            eval_tier = determine_daws_eval_tier(int(week), final_week)
 
-            prob_p, prob_r, prob_s, prob_d = compute_elim_probs(samples_use, active_df, daws_tier)
+            prob_p, prob_r, prob_s, prob_d = compute_elim_probs(samples_use, active_df, eval_tier)
             risk_records.extend([
                 {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Percent", "prob": float(prob_p[c_idx])},
                 {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Rank", "prob": float(prob_r[c_idx])},
@@ -2093,14 +2113,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             f_rank = (-v_share).argsort().argsort() + 1
             combined = -(j_rank + f_rank)
         else:
-            mean_width = week_metrics_df[
-                (week_metrics_df["season"] == season) & (week_metrics_df["week"] == last_week)
-            ]["mean_hdi_width"].mean()
-            if np.isnan(mean_width):
-                mean_width = 0.0
             final_week = int(season_max_week.get(int(season), int(last_week)))
-            daws_tier, _ = determine_daws_tier(mean_width, int(last_week), final_week, u_p90, u_p97)
-            if daws_tier == "Red":
+            eval_tier = determine_daws_eval_tier(int(last_week), final_week)
+            if eval_tier == "Red":
                 combined = v_share
             else:
                 combined = 0.5 * j_share + 0.5 * v_share
@@ -2156,30 +2171,22 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 elim_pred = int(np.argmax(j_rank + f_rank))
             else:
                 j_scores = aligned["judge_total"].to_numpy()
-                mean_width = week_metrics_df[
-                    (week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)
-                ]["mean_hdi_width"].mean()
-                if np.isnan(mean_width):
-                    mean_width = 0.0
                 final_week = int(season_max_week.get(int(season), int(week)))
-                daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, u_p90, u_p97)
-                if daws_tier == "Red":
+                eval_tier = determine_daws_eval_tier(int(week), final_week)
+                if eval_tier == "Red":
                     elim_pred = int(np.argmin(v_share))
-                elif daws_tier == "Yellow":
+                else:
+                    combined_p = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
+                    elim_p = int(np.argmin(combined_p))
                     j_rank = pd.Series(j_share).rank(ascending=False, method="average").to_numpy()
                     f_rank = (-v_share).argsort().argsort() + 1
-                    comb_rank = j_rank + f_rank
-                    bottom_two = np.argsort(comb_rank)[-2:]
-                    if len(bottom_two) < 2:
-                        elim_pred = int(np.argmax(comb_rank))
+                    elim_r = int(np.argmax(j_rank + f_rank))
+                    if elim_p == elim_r:
+                        elim_pred = elim_p
                     else:
-                        a, b = int(bottom_two[0]), int(bottom_two[1])
-                        diff = j_scores[b] - j_scores[a]
-                        p_elim_a = 1 / (1 + math.exp(JUDGESAVE_BETA * diff))
-                        elim_pred = a if p_elim_a >= 0.5 else b
-                else:
-                    combined = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
-                    elim_pred = int(np.argmin(combined))
+                        diff = j_scores[elim_r] - j_scores[elim_p]
+                        p_elim_p = 1 / (1 + math.exp(JUDGESAVE_BETA * diff))
+                        elim_pred = elim_p if p_elim_p >= 0.5 else elim_r
             if elim_pred not in elim_idx:
                 elim_mismatch += 1
 

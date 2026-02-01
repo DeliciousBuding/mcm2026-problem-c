@@ -259,7 +259,7 @@ Metrics (higher is better unless noted):
 \keyoutput{A shared metric interface allows direct comparison across mechanisms.}
 
 \begin{takeawaybox}
-\textbf{Methodology Alignment Box.} Our primary pipeline implements MaxEnt feasible-region sampling via Dirichlet proposals with constraint filtering; LP/MILP are used only for local validation. Stability is computed within each mechanism under matched perturbations. DAWS is a pro-integrity safety net with publishable quantile thresholds (P80/P90), a Green-tier base weight $\alpha=0.65$, and a final-week Red override; the judge-save curve uses a calibrated $\beta=4.0$ for illustration.
+\textbf{Methodology Alignment Box.} Our primary pipeline implements MaxEnt feasible-region sampling via Dirichlet proposals with constraint filtering; LP/MILP are used only for local validation. Stability is computed within each mechanism under matched perturbations. DAWS is a conflict-triggered protocol: when Percent and Rank agree we follow the 50/50 percent rule; when they disagree we invoke judge-save with a decisive $\beta=6.0$, and only the finale is audience-only. Quantile lines (P85/P95) are retained for monitoring and visualization.
 \end{takeawaybox}
 
 \section{Model A: Feasible-Region Audit}
@@ -469,19 +469,18 @@ We place the GBDT robustness check in Appendix~\ref{app:auc}; it supports covari
 \keyoutput{Dual models answer Task 3; predictive details are deferred to the appendix.}
 
 \section{Model D: Mechanism Design (DAWS)}
-\takeaway{DAWS is a three-tier risk-control protocol with explicit actions.}
-We define the risk index as $R_t=U_t$ (weekly uncertainty via mean HDI width) and apply a discrete protocol:
+\takeaway{DAWS is a conflict-triggered protocol that patches rule disagreement.}
+We define the democratic deficit as $D=\Pr(E^{(\text{rank})}_t \ne E^{(\text{percent})}_t)$ and use this conflict as the trigger. DAWS runs in two operational modes plus a finale override:
 \begin{itemize}[leftmargin=2em]
-\item \textbf{Tier 1 (Green).} $R_t<Q_{0.80}$ \;\;$\Rightarrow$ pro-integrity 65/35 split (judges/fans).
-\item \textbf{Tier 2 (Yellow).} $Q_{0.80}\le R_t<Q_{0.90}$ \;\;$\Rightarrow$ activate judge-save (bottom-two + save).
-\item \textbf{Tier 3 (Red).} $R_t\ge Q_{0.90}$ or Final week \;\;$\Rightarrow$ 100\% audience vote.
+\item \textbf{Consensus (Green).} If Percent and Rank agree, follow Percent (50/50) to preserve viewer agency.
+\item \textbf{Conflict (Yellow).} If they disagree, activate judge-save between the two candidates to restore integrity.
+\item \textbf{Finale (Red).} Audience-only voting.
 \end{itemize}
-DAWS is a \textit{Pro-Integrity Safety Net}: in standard weeks it emphasizes professional judgment ($\alpha=0.65$), in high-risk weeks it activates judge-save with a decisive $\beta=4.0$, and only in the finale does it fully yield to the audience. Thresholds are publishable and operational.
-Figure~\ref{fig:daws-trigger} shows the resulting tier schedule.
+We retain $U_t$ as a monitoring signal for the dashboard; Fig.~\ref{fig:daws-trigger} shows $U_t$ with P85/P95 bands for transparency.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
-\caption{DAWS trigger schedule: weekly uncertainty $U_t$, with dashed lines marking the P80/P90 thresholds and the resulting tier (Green/Yellow/Red).}
+\caption{DAWS monitoring panel: weekly uncertainty $U_t$ with dashed P85/P95 bands for transparency; activation is conflict-triggered.}
 \label{fig:daws-trigger}
 \end{figure}
 We also provide a producer-facing dashboard concept for operational use (Fig.~\ref{fig:dashboard-concept}).
@@ -503,16 +502,16 @@ We use a calibrated $\beta$ in
 \begin{equation}
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
 \end{equation}
-In the Yellow risk tier, we treat judges as decisive gatekeepers and set $\beta=4.0$ to reflect a strong corrective response against popularity bias.
+In conflict weeks, we treat judges as decisive gatekeepers and set $\beta=6.0$ to reflect a strong corrective response against popularity bias.
 
 % Judge-save 决策曲线
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
-\caption{Judges prefer higher score within the bottom two; the curve uses calibrated $\beta=4.0$ to illustrate the Yellow-tier decision sensitivity.}
+\caption{Judges prefer higher score within the bottom two; the curve uses calibrated $\beta=6.0$ to illustrate conflict-week decision sensitivity.}
 \end{figure}
 
-\keyoutput{DAWS tier protocol and calibrated judge-save behavior.}
+\keyoutput{Conflict-triggered DAWS protocol and calibrated judge-save behavior.}
 
 \section{Sensitivity and Validation}
 \takeaway{Key claims are stable to $\sigma$, $\epsilon$, and rule-switch priors.}
@@ -563,7 +562,7 @@ We present the smoothness parameter sensitivity analysis here. Key conclusions r
 \label{fig:sigma-sensitivity}
 \end{figure}
 
-% DAWS parameter scan removed for final override (fixed pro-integrity configuration).
+% DAWS parameter scan removed for final override (conflict-triggered configuration).
 
 \section{Predictive Calibration}\label{app:auc}
 We include forward-chaining AUC results as a robustness check on covariate relevance.
