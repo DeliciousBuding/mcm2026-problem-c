@@ -9,6 +9,7 @@
   "stability_daws": 0.7546068235723409,
   "integrity_daws": 0.37593504834884145,
   "fairness_daws": 0.05341581758264674,
+  "audit_weak_rate": 0.7880597014925373,
   "fast_strict_mae": 0.004522754464847319,
   "fast_strict_top1": 0.7671641791044777,
   "fast_strict_top2": 0.8,

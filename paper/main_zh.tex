@@ -280,6 +280,9 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 \end{algorithmic}
 \end{algorithm}
 
+\paragraph{审计弱周（仅披露）}
+当可行采样过少（$n_{\text{accept}}<200$）或触发回退时，我们标记该周为 \textit{Audit-Weak}。此时 $V_t$ 仅作为披露/监控信号，不作为干预触发，并在审计元数据中显式标注。
+
 \subsection{Rank 规则可行序列（Monte Carlo）}
 \begin{algorithm}[H]
 \caption{Rank 可行序列到 share 采样（Monte Carlo 生成候选序列后筛选）。}
@@ -461,7 +464,7 @@ GBDT 仅作为协变量有效性的鲁棒性检验，细节置于附录~\ref{app
 \item \textbf{冲突模式（黄）.} 若结论冲突，触发 judge-save 在两名候选人中纠偏。
 \item \textbf{决赛（红）.} 观众独裁。
 \end{itemize}
-我们保留 $U_t$ 作为监控信号；图~\ref{fig:daws-trigger} 展示 P85/P95 监控线以增强透明度。
+干预仅由 $A_t$（规则冲突）触发，$V_t$ 仅用于披露/审计预算。我们保留 $U_t$ 作为监控信号；图~\ref{fig:daws-trigger} 展示 P85/P95 监控线以增强透明度。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
@@ -509,6 +512,15 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \includegraphics[width=0.90\linewidth]{figures/fig_synthetic_validation.pdf}
 \caption{合成验证：高噪声压力测试下，真值粉丝占比（红线）位于 95\% HDI 蓝带内。}
 \label{fig:synthetic-validation}
+\end{figure}
+
+\paragraph{Judge-save 强度敏感性}
+我们仅在冲突周评估 $\beta$。图~\ref{fig:beta-sensitivity} 展示决策曲线与完整性—能动性权衡；$\beta=6.0$ 位于增益趋于饱和且能动性损失仍可控的区间。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_beta_sensitivity.pdf}
+\caption{Judge-save 参数 $\beta$ 的敏感性（仅冲突周）：logit 决策曲线与完整性—能动性权衡。}
+\label{fig:beta-sensitivity}
 \end{figure}
 
 \subsection{规模对比实验}

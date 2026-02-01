@@ -214,14 +214,14 @@ def sample_week_percent(
     epsilon: float,
     n_props: int,
     rng: np.random.Generator | None = None,
-) -> Tuple[np.ndarray, float]:
+) -> Tuple[np.ndarray, float, Dict[str, object]]:
     # --- 极速向量化版本 (无需思考，直接用) ---
     if rng is None:
         rng = RNG
     active_df = week_df[week_df["active"]].copy()
     n = len(active_df)
     if n == 0:
-        return np.empty((0, 0)), 0.0
+        return np.empty((0, 0)), 0.0, {"feasible_flag": False, "fallback_flag": True, "n_accept": 0, "violation_proxy": 1.0}
 
     j = active_df["judge_share"].to_numpy()
     elim_idx = [i for i, flag in enumerate(active_df["is_eliminated_week"].to_numpy()) if flag]
@@ -245,11 +245,23 @@ def sample_week_percent(
         mask = is_bottom.any(axis=1)
 
     accepted = proposals[mask]
+    n_accept = int(len(accepted))
+    fallback_flag = False
+    # violation_proxy：约束违反率（越高表示越不可信）
+    violation_proxy = float(1.0 - mask.mean())
+    feasible_flag = bool(mask.any())
     # 如果没采到，就强制返回随机样本（为了保证程序不崩）
-    if len(accepted) < 5:
+    if n_accept < 5:
+        fallback_flag = True
         accepted = proposals[:10]
 
-    return accepted, float(mask.mean())
+    meta = {
+        "feasible_flag": feasible_flag,
+        "fallback_flag": fallback_flag,
+        "n_accept": n_accept,
+        "violation_proxy": violation_proxy,
+    }
+    return accepted, float(mask.mean()), meta
 
 
 def lp_bounds_and_slack(week_df, alpha, epsilon, compute_bounds):
@@ -617,7 +629,7 @@ def synthetic_data_validation(
 
     posterior_rows: List[Dict[str, object]] = []
     for (season, week), wdf in long_df.groupby(["season", "week"], sort=True):
-        samples, acc_rate = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props, rng)
+        samples, acc_rate, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props, rng)
         if len(samples) == 0:
             continue
         if len(samples) > MAX_SAMPLES_PER_WEEK:
@@ -743,7 +755,8 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(status_box)
-    ax.text(0.07, 0.79, "Status", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.07, 0.79, "Signal V", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.07, 0.74, "Monitoring Only (No Override)", fontsize=7, color=COLOR_GRAY)
     lights = [("Green", "#7FBF7B"), ("Yellow", "#F1C232"), ("Red", COLOR_WARNING)]
     y_pos = [0.67, 0.55, 0.43]
     for (label, color), y in zip(lights, y_pos):
@@ -751,8 +764,8 @@ def render_dashboard_concept() -> None:
         face = color if active else "#DDDDDD"
         circle = Circle((0.11, y), 0.035, facecolor=face, edgecolor="#666666", linewidth=1.0)
         ax.add_patch(circle)
-    ax.text(0.19, 0.55, "Tier 2 Active", fontsize=9, color=COLOR_WARNING, fontweight="bold")
-    ax.text(0.08, 0.28, "Risk Index: U_t=0.46", fontsize=8, color=COLOR_GRAY)
+    ax.text(0.19, 0.55, "Audit Level: Yellow", fontsize=9, color=COLOR_WARNING, fontweight="bold")
+    ax.text(0.08, 0.28, "Disclosure: Warning", fontsize=8, color=COLOR_GRAY)
 
     # 审计区
     audit_box = FancyBboxPatch(
@@ -787,7 +800,8 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(rec_box)
-    ax.text(0.75, 0.79, "Recommendation", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.75, 0.79, "Signal A", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.75, 0.74, "Action Trigger", fontsize=7, color=COLOR_GRAY)
     rec_callout = FancyBboxPatch(
         (0.75, 0.50),
         0.18,
@@ -798,8 +812,9 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(rec_callout)
-    ax.text(0.84, 0.59, "Activate\nJudge Save", ha="center", va="center", fontsize=9, fontweight="bold", color=COLOR_WARNING)
-    ax.text(0.75, 0.32, "Flag: Contestant B", fontsize=8, color=COLOR_WARNING)
+    ax.text(0.84, 0.59, "Protocol\nStatus:\nJUDGE SAVE", ha="center", va="center",
+            fontsize=8, fontweight="bold", color=COLOR_WARNING)
+    ax.text(0.75, 0.32, "Triggered by Conflict (A=1)", fontsize=7.5, color=COLOR_WARNING)
 
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_dashboard_concept.pdf")
@@ -824,7 +839,7 @@ def process_season_samples(
         if len(active_df) == 0:
             continue
 
-        samples, acc_rate = sample_week_percent(wdf, alpha, epsilon, n_props, rng)
+        samples, acc_rate, meta = sample_week_percent(wdf, alpha, epsilon, n_props, rng)
         _, slack = lp_bounds_and_slack(wdf, alpha, epsilon, compute_bounds)
 
         key = (int(season), int(week))
@@ -862,6 +877,10 @@ def process_season_samples(
             "accept_rate": acc_rate,
             "slack": slack,
             "mean_hdi_width": float(np.mean(hdi_width)),
+            "feasible_flag": bool(meta.get("feasible_flag", False)),
+            "fallback_flag": bool(meta.get("fallback_flag", False)),
+            "n_accept": int(meta.get("n_accept", 0)),
+            "violation_proxy": float(meta.get("violation_proxy", 1.0)),
         })
 
     return {
@@ -1006,7 +1025,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 acc_rate = acc_cache[key]
                 slack = slack_cache[key]
             else:
-                samples, acc_rate = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+                samples, acc_rate, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
                 _, slack = lp_bounds_and_slack(wdf, ALPHA_PERCENT, EPSILON, COMPUTE_BOUNDS)
                 samples_cache[key] = samples
                 acc_cache[key] = acc_rate
@@ -1053,7 +1072,27 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     log(f"Posterior rows: {len(posterior_df)}, Week metrics: {len(week_metrics_df)}")
     season_max_week = week_metrics_df.groupby("season")["week"].max().to_dict()
 
-    u_series = week_metrics_df["mean_hdi_width"].dropna()
+    # Audit meta & confidence tag (pre-registered thresholds)
+    if not week_metrics_df.empty:
+        week_metrics_df["audit_weak"] = (
+            (~week_metrics_df["feasible_flag"])
+            | (week_metrics_df["fallback_flag"])
+            | (week_metrics_df["n_accept"] < 200)
+        )
+
+        def _confidence_tag(row: pd.Series) -> str:
+            if row["audit_weak"]:
+                return "Low"
+            if row["accept_rate"] < 0.01:
+                return "Medium"
+            return "High"
+
+        week_metrics_df["confidence_tag"] = week_metrics_df.apply(_confidence_tag, axis=1)
+
+    if "audit_weak" in week_metrics_df:
+        u_series = week_metrics_df.loc[~week_metrics_df["audit_weak"], "mean_hdi_width"].dropna()
+    else:
+        u_series = week_metrics_df["mean_hdi_width"].dropna()
     if u_series.empty:
         u_p90 = 0.0
         u_p97 = 0.0
@@ -1065,6 +1104,20 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # DAWS 档位输出（供 Dashboard 使用）
     if save_outputs and not week_metrics_df.empty:
+        audit_cols = [
+            "season",
+            "week",
+            "accept_rate",
+            "n_accept",
+            "feasible_flag",
+            "fallback_flag",
+            "violation_proxy",
+            "audit_weak",
+            "confidence_tag",
+        ]
+        audit_meta_df = week_metrics_df.loc[:, [c for c in audit_cols if c in week_metrics_df.columns]].copy()
+        audit_meta_df.to_csv(OUTPUT_DIR / "audit_week_meta.csv", index=False, encoding="utf-8")
+
         tier_records = []
         for _, row in week_metrics_df.iterrows():
             mean_width = float(row["mean_hdi_width"])
@@ -1080,6 +1133,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 "Risk_Score": mean_width,
                 "Tier_Label": tier_label,
                 "Action": action,
+                "Audit_Weak": bool(row.get("audit_weak", False)),
+                "Confidence_Tag": str(row.get("confidence_tag", "")),
             })
         pd.DataFrame(tier_records).to_csv(OUTPUT_DIR / "daws_tiers.csv", index=False, encoding="utf-8")
 
@@ -1124,7 +1179,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         key = (int(season), int(week))
         samples = samples_cache.get(key)
         if samples is None or len(samples) == 0:
-            samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+            samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
             samples_cache[key] = samples
         if len(samples) == 0:
             continue
@@ -1247,7 +1302,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         key = (int(season), int(week))
         samples = samples_cache.get(key)
         if samples is None or len(samples) == 0:
-            samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+            samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
             samples_cache[key] = samples
         if len(samples) == 0:
             continue
@@ -1682,6 +1737,12 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     # DAWS trigger schedule
     log("Rendering DAWS trigger schedule...")
     week_u = week_metrics_df.groupby("week")["mean_hdi_width"].mean().reset_index()
+    if "audit_weak" in week_metrics_df.columns:
+        audit_week = week_metrics_df.groupby("week")["audit_weak"].mean().reset_index()
+        week_u = week_u.merge(audit_week, on="week", how="left")
+        week_u["audit_weak"] = week_u["audit_weak"].fillna(0.0) > 0
+    else:
+        week_u["audit_weak"] = False
     if not week_u.empty:
         week_u = week_u.sort_values("week")
         max_week_all = int(week_u["week"].max())
@@ -1694,11 +1755,20 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             tier_label, _ = determine_daws_tier(mean_width, int(row["week"]), max_week_all, u_p90, u_p97)
             tiers.append(tier_map[tier_label])
         fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.6), sharex=True)
-        axes[0].plot(week_u["week"], week_u["mean_hdi_width"], marker="o", color=COLOR_PRIMARY)
+        axes[0].plot(week_u["week"], week_u["mean_hdi_width"], marker="o", color=COLOR_PRIMARY, label="U_t (monitoring)")
+        if week_u["audit_weak"].any():
+            axes[0].scatter(
+                week_u.loc[week_u["audit_weak"], "week"],
+                week_u.loc[week_u["audit_weak"], "mean_hdi_width"],
+                marker="x",
+                color=COLOR_WARNING,
+                s=45,
+                label="Audit-Weak flagged",
+            )
         axes[0].axhline(u_p90, color=COLOR_ACCENT, linestyle="--", linewidth=1.0, label=f"P{int(DAWS_U_P90 * 100)} threshold")
         axes[0].axhline(u_p97, color=COLOR_WARNING, linestyle="--", linewidth=1.0, label=f"P{int(DAWS_U_P97 * 100)} threshold")
         axes[0].set_ylabel("U_t (mean HDI width)")
-        axes[0].set_title("DAWS trigger: risk control tiers")
+        axes[0].set_title("Monitoring signal U_t (audit + disclosure)")
         axes[0].legend(frameon=False, fontsize=8, loc="upper right")
 
         axes[1].step(week_u["week"], tiers, where="mid", color=COLOR_PRIMARY_DARK, linewidth=1.6)
@@ -1770,7 +1840,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             key = (int(season), int(week))
             samples = samples_cache.get(key)
             if samples is None or len(samples) == 0:
-                samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+                samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
                 samples_cache[key] = samples
             if len(samples) == 0:
                 continue
@@ -1888,6 +1958,88 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.title("Judge-save decision curve")
     plt.savefig(FIG_DIR / "fig_judgesave_curve.pdf")
     plt.close()
+
+    # Beta sensitivity (conflict weeks only)
+    betas = [2.0, 4.0, 6.0, 8.0]
+    beta_records = []
+    for beta in betas:
+        integrity_sum = 0.0
+        agency_dev_sum = 0.0
+        conflict_count = 0
+        for (season, week), wdf in season_week_groups:
+            final_week = int(season_max_week.get(int(season), int(week)))
+            if int(week) >= final_week:
+                continue
+            active_df = wdf[wdf["active"]].copy()
+            if len(active_df) == 0:
+                continue
+            key = (int(season), int(week))
+            samples = samples_cache.get(key)
+            if samples is None or len(samples) == 0:
+                continue
+            if len(samples) > MAX_SAMPLES_PER_WEEK:
+                idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
+                samples = samples[idx]
+
+            j_share = active_df["judge_share"].to_numpy()
+            j_scores = active_df["judge_total"].to_numpy()
+            j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+            j_share_matrix = np.tile(j_share, (len(samples), 1))
+            comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples
+            elim_p = np.argmin(comb_percent, axis=1)
+            fan_rank = np.argsort(np.argsort(-samples, axis=1), axis=1) + 1
+            comb_rank = fan_rank + np.tile(j_rank, (len(samples), 1))
+            elim_r = np.argmax(comb_rank, axis=1)
+            conflict_mask = elim_p != elim_r
+            if not np.any(conflict_mask):
+                continue
+
+            p_idx = elim_p[conflict_mask]
+            r_idx = elim_r[conflict_mask]
+            diff = j_scores[r_idx] - j_scores[p_idx]
+            p_elim_p = 1 / (1 + np.exp(beta * diff))
+            j_p = j_scores[p_idx]
+            j_r = j_scores[r_idx]
+            higher_is_p = j_p >= j_r
+            same_score = j_p == j_r
+            success_prob = np.where(same_score, 0.5, np.where(higher_is_p, 1 - p_elim_p, p_elim_p))
+            integrity_sum += float(success_prob.sum())
+            agency_dev_sum += float((1 - p_elim_p).sum())
+            conflict_count += len(p_elim_p)
+
+        if conflict_count > 0:
+            beta_records.append({
+                "beta": beta,
+                "integrity": integrity_sum / conflict_count,
+                "agency_deviation": agency_dev_sum / conflict_count,
+                "conflict_samples": conflict_count,
+            })
+
+    beta_df = pd.DataFrame(beta_records)
+    if not beta_df.empty:
+        beta_df.to_csv(OUTPUT_DIR / "beta_sensitivity.csv", index=False, encoding="utf-8")
+
+        fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.4))
+        diff_grid = np.linspace(-3, 3, 240)
+        for beta in betas:
+            axes[0].plot(diff_grid, 1 / (1 + np.exp(beta * diff_grid)), label=f"β={beta:.0f}")
+        axes[0].set_xlabel("Judge score diff (r − p)")
+        axes[0].set_ylabel("P(eliminate percent candidate)")
+        axes[0].set_title("Decision sensitivity (logit)")
+        axes[0].legend(frameon=False, fontsize=8)
+
+        axes[1].plot(beta_df["agency_deviation"], beta_df["integrity"], marker="o", color=COLOR_PRIMARY)
+        for _, row in beta_df.iterrows():
+            axes[1].annotate(f"β={row['beta']:.0f}", (row["agency_deviation"], row["integrity"]),
+                             textcoords="offset points", xytext=(4, 4), fontsize=8)
+        axes[1].set_xlabel("Agency deviation (conflict weeks)")
+        axes[1].set_ylabel("Integrity (conflict weeks)")
+        axes[1].set_title("Trade-off under β")
+        axes[1].set_xlim(0, 1)
+        axes[1].set_ylim(0, 1)
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_beta_sensitivity.pdf")
+        plt.close(fig)
 
     # Posterior predictive coverage (简化)
     coverage = 1 - np.nanmean(wrongful_heat)
@@ -2038,7 +2190,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             key = (int(season), int(week))
             samples = samples_cache.get(key)
             if samples is None or len(samples) == 0:
-                samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+                samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
                 samples_cache[key] = samples
             if len(samples) == 0:
                 continue
@@ -2265,6 +2417,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     median_hdi = float(np.nanmedian(week_metrics_df["mean_hdi_width"]))
     p90_hdi = float(np.nanquantile(week_metrics_df["mean_hdi_width"], 0.90))
     daws_improve = (stats_percent["stability"] - stats_daws["stability"]) / max(1e-6, stats_percent["stability"]) * 100
+    audit_weak_rate = float(week_metrics_df["audit_weak"].mean()) if "audit_weak" in week_metrics_df else float("nan")
 
     summary = {
         "seasons_feasible": seasons_feasible,
@@ -2277,6 +2430,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         "stability_daws": stats_daws["stability"],
         "integrity_daws": stats_daws["judge_integrity"],
         "fairness_daws": stats_daws["fairness"],
+        "audit_weak_rate": audit_weak_rate,
     }
     if fast_strict_summary:
         summary.update({
@@ -2307,6 +2461,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             f"\\newcommand{{\\MetricDAWSStability}}{{{summary['stability_daws']:.3f}}}",
             f"\\newcommand{{\\MetricDAWSIntegrity}}{{{summary['integrity_daws']:.3f}}}",
             f"\\newcommand{{\\MetricDAWSFairness}}{{{summary['fairness_daws']:.3f}}}",
+            f"\\newcommand{{\\MetricAuditWeakRate}}{{{summary.get('audit_weak_rate', float('nan'))*100:.1f}}}",
             f"\\newcommand{{\\MetricFastMAE}}{{{summary.get('fast_strict_mae', float('nan')):.4f}}}",
             f"\\newcommand{{\\MetricFastTopOne}}{{{summary.get('fast_strict_top1', float('nan'))*100:.1f}}}",
             f"\\newcommand{{\\MetricFastTopTwo}}{{{summary.get('fast_strict_top2', float('nan'))*100:.1f}}}",
@@ -2368,7 +2523,7 @@ def run_parameter_grid_search() -> None:
         active_df = wdf[wdf["active"]].copy()
         if len(active_df) == 0:
             continue
-        samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, fast_props, RNG)
+        samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, fast_props, RNG)
         if len(samples) == 0:
             continue
         lower = np.quantile(samples, 0.025, axis=0)

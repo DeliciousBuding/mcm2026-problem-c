@@ -280,6 +280,9 @@ For each week, constraints from the rule define a feasible region (a polytope) $
 \end{algorithmic}
 \end{algorithm}
 
+\paragraph{Audit-Weak weeks (disclosure only).}
+When the feasible sampler yields too few accepted proposals ($n_{\text{accept}}<200$) or requires fallback, we flag the week as \textit{Audit-Weak}. In these cases, $V_t$ is treated as a disclosure/monitoring signal rather than a decision trigger, and we surface the flag in audit metadata for transparency.
+
 \subsection{Rank Rule Feasible Orders (Monte Carlo)}
 \begin{algorithm}[H]
 \caption{Rank Feasible Orders to Feasible Shares (Monte Carlo)}
@@ -476,7 +479,7 @@ We define the democratic deficit as $D=\Pr(E^{(\text{rank})}_t \ne E^{(\text{per
 \item \textbf{Conflict (Yellow).} If they disagree, activate judge-save between the two candidates to restore integrity.
 \item \textbf{Finale (Red).} Audience-only voting.
 \end{itemize}
-We retain $U_t$ as a monitoring signal for the dashboard; Fig.~\ref{fig:daws-trigger} shows $U_t$ with P85/P95 bands for transparency.
+Intervention is triggered solely by $A_t$ (rule conflict); $V_t$ governs disclosure/audit budget only. We retain $U_t$ as a monitoring signal for the dashboard; Fig.~\ref{fig:daws-trigger} shows $U_t$ with P85/P95 bands for transparency.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
@@ -530,6 +533,15 @@ We further run a high-noise synthetic stress test and invert the generated elimi
 \includegraphics[width=0.90\linewidth]{figures/fig_synthetic_validation.pdf}
 \caption{Synthetic validation: true fan share (red) lies within the 95\% HDI band (blue) under a high-noise stress test.}
 \label{fig:synthetic-validation}
+\end{figure}
+
+\paragraph{Judge-save intensity sensitivity.}
+We evaluate $\beta$ on conflict weeks only. Fig.~\ref{fig:beta-sensitivity} reports the decision curve and the integrity--agency trade-off; $\beta=6.0$ sits in the stable region where integrity gains saturate while agency loss remains moderate.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_beta_sensitivity.pdf}
+\caption{Sensitivity of judge-save intensity $\beta$ (conflict weeks only): logit decision curves and the integrity--agency trade-off.}
+\label{fig:beta-sensitivity}
 \end{figure}
 
 \subsection{Scale Benchmark}
