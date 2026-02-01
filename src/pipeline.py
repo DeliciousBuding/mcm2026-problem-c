@@ -1103,6 +1103,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             plt.plot([0, lim], [0, lim], color=COLOR_GRAY, linestyle="--", linewidth=1.0)
             plt.xlabel("Fast mean fan share")
             plt.ylabel("Strict mean fan share")
+            # 添加 MAE/Top-1/Top-2 数值标注
+            ann_text = f"MAE={mae_mean:.4f}\nTop-1={top1_agree:.1%}\nTop-2={top2_agree:.1%}"
+            plt.annotate(ann_text, xy=(0.05, 0.95), xycoords="axes fraction",
+                         fontsize=8, va="top", ha="left", family="monospace",
+                         bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
             plt.title("Fast vs Strict posterior means")
             plt.tight_layout()
             plt.savefig(FIG_DIR / "fig_fast_vs_strict.pdf")
@@ -1209,7 +1214,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     ax.set_yticklabels(np.arange(1, max_season + 1))
     plt.xlabel("Week")
     plt.ylabel("Season")
-    plt.title("Uncertainty concentrates in a small set of weeks")
+    plt.title("Uncertainty concentrates in a small set of weeks\n(blank cells = no elimination or missing data)")
+    plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_uncertainty_heatmap.pdf")
     plt.close()
 
@@ -1223,6 +1229,13 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     ax.set_xticks(np.arange(max_week) + 0.5)
     ax.set_xticklabels(np.arange(1, max_week + 1))
     ax.set_yticks(np.arange(max_season) + 0.5)
+    ax.set_yticklabels(np.arange(1, max_season + 1))
+    plt.xlabel("Week")
+    plt.ylabel("Season")
+    plt.title("Wrongful elimination probability by week\n(blank cells = no elimination or missing data)")
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_wrongful_heatmap.pdf")
+    plt.close()
     ax.set_yticklabels(np.arange(1, max_season + 1))
     plt.xlabel("Week")
     plt.ylabel("Season")
@@ -1507,6 +1520,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.plot(xs, ys, color=COLOR_PRIMARY)
     plt.xlabel("Judge score difference")
     plt.ylabel("P(eliminate a)")
+    # 标注 β 为示意值
+    plt.annotate(f"β={JUDGESAVE_BETA} (illustrative)", xy=(0.95, 0.95), xycoords="axes fraction",
+                 fontsize=8, va="top", ha="right", style="italic",
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
     plt.title("Judge-save decision curve")
     plt.savefig(FIG_DIR / "fig_judgesave_curve.pdf")
     plt.close()
@@ -1515,9 +1532,13 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     coverage = 1 - np.nanmean(wrongful_heat)
     brier = np.nanmean(wrongful_heat * (1 - wrongful_heat))
     plt.figure(figsize=(4.8, 3.4))
-    plt.bar(["Coverage", "Brier"], [coverage, brier], color=[COLOR_PRIMARY, COLOR_ACCENT])
-    plt.ylim(0, 1)
-    plt.title("Posterior predictive checks")
+    bars = plt.bar(["Coverage ↑", "Brier ↓"], [coverage, brier], color=[COLOR_PRIMARY, COLOR_ACCENT])
+    # 在柱上标注数值
+    for bar, val in zip(bars, [coverage, brier]):
+        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
+                 f"{val:.3f}", ha="center", va="bottom", fontsize=9)
+    plt.ylim(0, 1.1)
+    plt.title("Posterior predictive checks (higher coverage, lower Brier is better)")
     plt.savefig(FIG_DIR / "fig_ppc_summary.pdf")
     plt.close()
 
