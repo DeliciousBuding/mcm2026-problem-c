@@ -902,6 +902,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     flip_sum = 0.0
     flip_count = 0
 
+    # 季节级指标收集（用于分布图）
+    season_metrics_list: List[Dict[str, Any]] = []
+
     # DAWS参数（分段阈值权重）
     alpha_base = DAWS_ALPHA_BASE
     alpha_dispute = DAWS_ALPHA_DISPUTE
@@ -935,6 +938,21 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             metrics[key]["instability_sum"] += eval_res[key]["instability"] * m
             metrics[key]["judge_integrity_sum"] += eval_res[key]["judge_integrity"] * m
             metrics[key]["count"] += m
+
+        # 收集季节级指标
+        season_metrics_list.append({
+            "season": int(season),
+            "week": int(week),
+            "percent_agency": eval_res["percent"]["agency"],
+            "percent_stability": 1.0 - eval_res["percent"]["instability"],
+            "percent_integrity": eval_res["percent"]["judge_integrity"],
+            "rank_agency": eval_res["rank"]["agency"],
+            "rank_stability": 1.0 - eval_res["rank"]["instability"],
+            "rank_integrity": eval_res["rank"]["judge_integrity"],
+            "daws_agency": eval_res["daws"]["agency"],
+            "daws_stability": 1.0 - eval_res["daws"]["instability"],
+            "daws_integrity": eval_res["daws"]["judge_integrity"],
+        })
 
         flip_sum += float(eval_res["flip_sum"])
         flip_count += m
@@ -1822,6 +1840,44 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_alluvial_finalists.pdf")
     plt.close()
+
+    # =========================
+    # 机制指标分布图（按季节聚合）
+    # =========================
+    if season_metrics_list:
+        sm_df = pd.DataFrame(season_metrics_list)
+        # 按季节聚合取均值
+        season_agg = sm_df.groupby("season").mean().reset_index()
+
+        fig, axes = plt.subplots(1, 3, figsize=(10, 3.5))
+
+        # Agency 分布
+        ax = axes[0]
+        ax.boxplot([season_agg["percent_agency"], season_agg["rank_agency"], season_agg["daws_agency"]],
+                   tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
+                   boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
+        ax.set_ylabel("Agency")
+        ax.set_title("Viewer Agency by Mechanism")
+
+        # Stability 分布
+        ax = axes[1]
+        ax.boxplot([season_agg["percent_stability"], season_agg["rank_stability"], season_agg["daws_stability"]],
+                   tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
+                   boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
+        ax.set_ylabel("Stability")
+        ax.set_title("Stability by Mechanism")
+
+        # Integrity 分布
+        ax = axes[2]
+        ax.boxplot([season_agg["percent_integrity"], season_agg["rank_integrity"], season_agg["daws_integrity"]],
+                   tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
+                   boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
+        ax.set_ylabel("Judge Integrity")
+        ax.set_title("Judge Integrity by Mechanism")
+
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_mechanism_distribution.pdf")
+        plt.close()
 
     # =========================
     # 输出指标与中间结果

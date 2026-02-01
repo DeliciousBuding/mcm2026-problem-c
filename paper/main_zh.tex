@@ -419,7 +419,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.96\linewidth]{figures/fig_counterfactual_risk_timeline.pdf}
-\caption{争议人物的反事实淘汰风险时间线（纵轴为每周被淘汰概率，四条线对应 percent/rank/judge-save/DAWS；用于回答“规则改变是否改变淘汰风险”）。}
+\caption{争议人物的反事实淘汰风险时间线（纵轴为每周被淘汰概率，四条线对应 percent/rank/judge-save/DAWS；用于回答"规则改变是否改变淘汰风险"）。\textit{注：DAWS 在能动性与稳定性之间取得权衡，非全面最优。}}
 \label{fig:counterfactual-risk}
 \end{figure}
 
@@ -431,7 +431,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_pareto_2d.pdf}
-\caption{观众参与度与稳定性的 Pareto 权衡，颜色表示评委一致性（曲线为 $\alpha$ 扫描，星标为 DAWS）。}
+\caption{观众参与度与稳定性的 Pareto 权衡，颜色表示评委一致性（曲线为 $\alpha$ 扫描，星标为 DAWS）。\textit{注：无绝对最优解，DAWS 选择近 Pareto 最优点。}}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.49\linewidth}
@@ -483,7 +483,7 @@ GBDT 分季 AUC 表现稳定，详见附录~\ref{app:auc}。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
-\caption{DAWS 触发与权重档位（上：$U_t$ 与公开阈值；下：对应的评委权重档位阶梯，常规/争议/极端周）。}
+\caption{DAWS 触发与权重档位（上：$U_t$ 与公开阈值；下：对应的评委权重档位阶梯，常规/争议/极端周）。\textit{注：阈值为超参数，设计时权衡响应速度与虚警率。}}
 \label{fig:daws-trigger}
 \end{figure}
 \begin{proposition}[单调性]
