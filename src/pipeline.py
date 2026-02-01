@@ -30,10 +30,12 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 # 全局配置（）
 # =========================
 RNG = np.random.default_rng(20260131)
-DATA_PATH = Path("2026_MCM_Problem_C_Data.csv")
-OUTPUT_DIR = Path("outputs")
-FIG_DIR = Path("paper/figures")
-SUMMARY_TEX = Path("paper/summary_metrics.tex")
+# 脚本所在目录的父目录（项目根目录）
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_PATH = _PROJECT_ROOT / "data" / "2026_MCM_Problem_C_Data.csv"
+OUTPUT_DIR = _PROJECT_ROOT / "outputs"
+FIG_DIR = _PROJECT_ROOT / "paper/figures"
+SUMMARY_TEX = _PROJECT_ROOT / "paper/summary_metrics.tex"
 LOG_PATH = OUTPUT_DIR / "run.log"
 BENCHMARK_CSV = OUTPUT_DIR / "scale_benchmark.csv"
 
