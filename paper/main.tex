@@ -462,11 +462,10 @@ We fit mixed-effects models on logit shares:
 \caption{Annotated outliers highlight features with the largest judge-fan gaps.}
 \end{figure}
 
-\subsection{Predictive Add-on: GBDT}
-\takeaway{We include a predictive model as a robustness check, not as the main driver analysis.}
-We train a gradient-boosted decision tree (GBDT) classifier to predict elimination using forward-chaining validation and report AUC as a sanity check on covariate relevance. Predictive performance is stable and supports the selected covariates; see Appendix~\ref{app:auc} for the calibration curve.
+\paragraph{Predictive add-on (Appendix).}
+We place the GBDT robustness check in Appendix~\ref{app:auc}; it supports covariate relevance but is not central to the mechanism design.
 
-\keyoutput{Dual models and a direct answer to Task 3: effects are not identical.}
+\keyoutput{Dual models answer Task 3; predictive details are deferred to the appendix.}
 
 \section{Model D: Mechanism Design (DAWS)}
 \takeaway{DAWS is a three-tier risk-control protocol with explicit actions.}
