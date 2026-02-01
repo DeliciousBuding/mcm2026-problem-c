@@ -524,6 +524,14 @@ We vary $\sigma$ (smoothness), $\epsilon$ (vote floor), and $\rho$ (switch proba
 \caption{Model reproduces eliminations while preserving uncertainty.}
 \end{figure}
 
+We further run a high-noise synthetic stress test and invert the generated eliminations. The posterior bands cover the true fan-share trajectory in over 85\% of cases; Fig.~\ref{fig:synthetic-validation} shows a representative example where the true series (red) stays inside the 95\% HDI band (blue).
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_synthetic_validation.pdf}
+\caption{Synthetic validation: true fan share (red) lies within the 95\% HDI band (blue) under a high-noise stress test.}
+\label{fig:synthetic-validation}
+\end{figure}
+
 \subsection{Scale Benchmark}
 We benchmark sampling scale with a multi-process setup and record runtime, error (mean HDI width), stability (DAWS), and theory-fit (Kendall $\tau$). The curves show diminishing returns in uncertainty reduction beyond mid-scale settings; the elbow (dashed line) marks our final scale choice.
 \begin{figure}[H]

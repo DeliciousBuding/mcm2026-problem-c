@@ -502,6 +502,14 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \caption{后验预测检验结果（Coverage 越高越好，Brier 越低越好；Brier 反映概率预测误差大小）。}
 \end{figure}
 
+我们进一步进行高噪声的合成压力测试并反演淘汰结果。总体覆盖率超过 85\%，代表性案例见图~\ref{fig:synthetic-validation}：红线为真值，蓝带为 95\% HDI。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{figures/fig_synthetic_validation.pdf}
+\caption{合成验证：高噪声压力测试下，真值粉丝占比（红线）位于 95\% HDI 蓝带内。}
+\label{fig:synthetic-validation}
+\end{figure}
+
 \subsection{规模对比实验}
 我们在多进程设置下比较不同采样规模，记录运行时间、误差（均值 HDI 宽度）、稳定性（DAWS）与理论匹配度（Kendall $\tau$）。结果显示误差随规模提升而趋于平缓，图中虚线标注了拐点与最终规模选择。
 \begin{figure}[H]
