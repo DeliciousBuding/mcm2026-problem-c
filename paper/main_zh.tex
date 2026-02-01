@@ -136,7 +136,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \node[red!70,anchor=west,scale=0.7] at (0.82,0.30) {elim};
 \end{tikzpicture}
 \end{center}
-\textbf{建议.} 采用 DAWS 三档风控协议（红/黄/绿），并公开 bottom-two 与 judge-save 判定标准。
+\textbf{建议.} 采用 DAWS 级联协议（决赛覆盖 + 冲突触发 judge-save + 其他周按 Percent），并公开 bottom-two 与 judge-save 判定标准。
 \end{minipage}
 
 \clearpage
@@ -159,7 +159,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 
 \textbf{执行摘要.} 审计结果显示，Rank 规则会压缩粉丝支持度：约每 5 周中就有 1 周出现淘汰翻转风险。这形成“民主赤字”，并带来不必要的争议与声誉风险。
 
-\textbf{方案.} 我们提出 DAWS 三档风控协议，由不确定性指数触发：绿档为常规 50/50；黄档启动 judge-save；红档（决赛周）完全观众投票。该方案规则公开、易于解释且可直接执行。
+\textbf{方案.} 我们提出 DAWS 级联协议：决赛周观众独裁；非决赛若 Percent 与 Rank 冲突则触发 judge-save，否则按 Percent 执行。不确定性信号 $V_t$ 仅用于披露等级与审计预算，不直接干预。该方案规则公开、易于解释且可直接执行。
 
 \textbf{价值.} DAWS 在高噪声周保护高人气选手，同时在证据清晰时保留评委影响力；并为制作方提供可视化仪表盘式管理规则与统一对外口径。
 
@@ -181,9 +181,9 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 % Main Report
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{引言与路线图}
-\takeaway{我们将 DWTS 视为“审计—压力测试—风控—可视化监控”的完整闭环。}
+\takeaway{我们将 DWTS 视为“审计—压力测试—冲突触发—披露监控”的完整闭环。}
 我们观测到每周评委分数与淘汰结果，但粉丝投票是潜变量。目标不是猜测唯一投票值，而是给出与规则一致的完整可行集合，并将不确定性传播到反事实机制评估与规则设计中。
-我们的流程强调可执行性：先审计可行粉丝票集合，再用合成数据压力测试，随后部署 DAWS 三档风控协议，并通过仪表盘输出可执行决策口径。
+我们的流程强调可执行性：先审计可行粉丝票集合，再用合成数据压力测试，随后部署 DAWS 级联协议（冲突触发 + 决赛覆盖），并通过仪表盘输出披露与行动口径。
 
 \textbf{贡献.} (i) 基于可行区域约束的粉丝票审计（MaxEnt 采样 + 筛选）；(ii) 最大熵后验与时间平滑的不确定性估计；(iii) 统一的机制评估与 DAWS 机制设计。
 
@@ -460,8 +460,8 @@ GBDT 仅作为协变量有效性的鲁棒性检验，细节置于附录~\ref{app
 \takeaway{DAWS 是“规则冲突触发”协议，用于修补分歧周。}
 我们将“民主赤字”定义为 $D=\Pr(E^{(\text{rank})}_t \ne E^{(\text{percent})}_t)$，并以此作为触发条件。DAWS 包含两种运行模式 + 决赛覆盖：
 \begin{itemize}[leftmargin=2em]
-\item \textbf{一致模式（绿）.} 若 Percent 与 Rank 结论一致，直接沿用 Percent（50/50），保留观众话语权。
-\item \textbf{冲突模式（黄）.} 若结论冲突，触发 judge-save 在两名候选人中纠偏。
+\item \textbf{一致模式（A=0）.} 若 Percent 与 Rank 结论一致，直接沿用 Percent（50/50），保留观众话语权。
+\item \textbf{冲突模式（A=1）.} 若结论冲突，触发 judge-save 在两名候选人中纠偏。
 \item \textbf{决赛（红）.} 观众独裁。
 \end{itemize}
 干预仅由 $A_t$（规则冲突）触发，$V_t$ 仅用于披露/审计预算。我们保留 $U_t$ 作为监控信号；图~\ref{fig:daws-trigger} 展示 P85/P95 监控线以增强透明度。
@@ -539,7 +539,7 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \begin{itemize}[leftmargin=2em]
 \item \textbf{可读结论：} 不确定性集中在少数周，其余周可识别性较高。
 \item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 提升能动性但稳定性略有代价（见图~\ref{fig:counterfactual-risk} 与图~\ref{fig:daws-trigger}）。
-\item \textbf{落地建议：} 公布 DAWS 档位规则与 judge-save 规则以提升透明度。
+\item \textbf{落地建议：} 公布冲突触发与披露规则及 judge-save 规则以提升透明度。
 \end{itemize}
 
 \clearpage
