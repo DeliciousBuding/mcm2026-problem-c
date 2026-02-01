@@ -30,7 +30,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 # 全局配置（）
 # =========================
 RNG = np.random.default_rng(20260131)
-DATA_PATH = Path("2026_MCM_Problem_C_Data.csv")
+DATA_PATH = Path("data/2026_MCM_Problem_C_Data.csv")
 OUTPUT_DIR = Path("outputs")
 FIG_DIR = Path("paper/figures")
 SUMMARY_TEX = Path("paper/summary_metrics.tex")
