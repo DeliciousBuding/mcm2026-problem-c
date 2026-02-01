@@ -161,7 +161,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \begin{itemize}[leftmargin=2em]
 \item 规则整体与淘汰结果一致（$S^*\approx 0$），但不确定性在不同周差异明显。
 \item Rank 聚合是对粉丝支持度的有损压缩，造成显著翻转概率。
-\item DAWS 在能动性、评委一致性与稳定三指标上实现更好折中。
+\item DAWS 提升能动性与评委一致性，但稳定性略有代价（权衡方案）。
 \end{itemize}
 
 \textbf{主要发现.}
@@ -418,11 +418,13 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{equation}
 E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{equation}
+图~\ref{fig:counterfactual-risk} 给出关键争议人物在不同机制下的逐周淘汰风险，用以回答“规则改变是否改变结局”。
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.96\linewidth]{figures/fig_counterfactual_risk_timeline.pdf}
 \caption{争议人物的反事实淘汰风险时间线（纵轴为每周被淘汰概率，四条线对应 percent/rank/judge-save/DAWS；用于回答“规则改变是否改变淘汰风险”）。}
+\label{fig:counterfactual-risk}
 \end{figure}
 
 \begin{figure}[H]
@@ -485,10 +487,12 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{cases}
 \end{equation}
 其中 $q_{90},q_{97}$ 为 $U_t$ 的分位阈值（仅在最不确定的周触发更高权重）。
+图~\ref{fig:daws-trigger} 展示阈值触发与权重档位的对应关系，强调规则可解释与可执行。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
 \caption{DAWS 触发与权重档位（上：$U_t$ 与公开阈值；下：对应的评委权重档位阶梯，常规/争议/极端周）。}
+\label{fig:daws-trigger}
 \end{figure}
 \begin{proposition}[单调性]
 评委与粉丝占比同时上升时，DAWS 得分不下降。
@@ -530,11 +534,11 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \keyoutput{敏感性曲线与后验预测覆盖率。}
 
 \section{结论与建议}
-\takeaway{审计先行揭示关键不确定性，DAWS 提供稳健折中。}
-我们完成全赛季粉丝票审计，量化 Rank 机制的民主赤字，并提出 DAWS 方案以提升能动性、评委一致性与稳定。
+\takeaway{审计先行揭示关键不确定性，DAWS 提供透明权衡。}
+我们完成全赛季粉丝票审计，量化 Rank 机制的民主赤字，并提出 DAWS 作为透明权衡方案以提升能动性与评委一致性，同时承认稳定性存在小幅代价。
 \begin{itemize}[leftmargin=2em]
 \item \textbf{可读结论：} 不确定性集中在少数周，其余周可识别性较高。
-\item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 在稳定性上更优且不牺牲能动性/一致性。
+\item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 提升能动性但稳定性略有代价（见图~\ref{fig:counterfactual-risk} 与图~\ref{fig:daws-trigger}）。
 \item \textbf{落地建议：} 公布 DAWS 权重计划与 judge-save 规则以提升透明度。
 \end{itemize}
 
