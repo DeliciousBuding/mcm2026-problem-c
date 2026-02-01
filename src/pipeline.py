@@ -418,7 +418,7 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
     """绘制规模对比图（时间、误差、稳定性、匹配度）。"""
     if df.empty:
         return
-    fig, axes = plt.subplots(2, 2, figsize=(7.6, 5.6))
+    fig, axes = plt.subplots(2, 2, figsize=(9.6, 7.2), dpi=600)
     x = df["n_proposals"]
     # elbow 计算（基于 mean_hdi 的边际收益）
     if len(df) >= 3:
@@ -465,7 +465,7 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
         axes[0, 1].text(elbow_x, axes[0, 1].get_ylim()[1] * 0.92, "Elbow", ha="center", color=COLOR_WARNING, fontsize=8)
 
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_scale_benchmark.pdf")
+    plt.savefig(FIG_DIR / "fig_scale_benchmark.pdf", dpi=600)
     plt.close(fig)
 
 
