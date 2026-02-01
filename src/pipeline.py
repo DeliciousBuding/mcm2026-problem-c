@@ -1378,10 +1378,17 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # Pro dancer effects difference (Top 20)
     def clean_pro_name(name: str) -> str:
-        return re.sub(r"\s*\(.*\)$", "", str(name)).strip()
+        base = re.sub(r"\s*\(.*\)$", "", str(name)).strip()
+        if "/" in base:
+            base = base.split("/")[0].strip()
+        return base
 
     pro_effects_sorted = pro_effects.copy()
     pro_effects_sorted["pro_clean"] = pro_effects_sorted["pro"].apply(clean_pro_name)
+    pro_effects_sorted = (
+        pro_effects_sorted.groupby("pro_clean", as_index=False)
+        .agg({"effect_j": "mean", "effect_f": "mean", "se": "mean"})
+    )
     pro_effects_sorted["diff"] = pro_effects_sorted["effect_f"] - pro_effects_sorted["effect_j"]
     pro_effects_sorted = pro_effects_sorted.sort_values("diff", ascending=False, key=lambda s: s.abs()).head(20)
     fig, ax = plt.subplots(1, 1, figsize=(6.2, 5.2))
@@ -1515,9 +1522,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.close(fig)
 
     # =========================
-    # Alluvial-like flow（决赛阵容）
+    # Finalists outcome changes (bar chart)
     # =========================
-    log("Rendering finalists flow chart...")
+    log("Rendering finalists outcome change chart...")
     def get_finalists(season_df: pd.DataFrame) -> List[str]:
         top = season_df.sort_values("placement").head(3)
         return top["celebrity_name"].tolist()
@@ -1542,83 +1549,87 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         idx = np.argsort(-combined)[:3]
         return wk.iloc[idx]["celebrity_name"].tolist()
 
-    def draw_alluvial(ax, counts: Dict[str, int], title: str) -> None:
-        total = sum(counts.values())
-        if total == 0:
-            ax.text(0.5, 0.5, "No data", ha="center", va="center")
-            ax.axis("off")
-            return
-        # 左右柱高度
-        af = counts["ff"] + counts["fn"]
-        anf = counts["nf"] + counts["nn"]
-        pf = counts["ff"] + counts["nf"]
-        pnf = counts["fn"] + counts["nn"]
+    def compute_outcome_metrics(mechanism: str) -> Dict[str, float]:
+        seasons_count = 0
+        champ_change = 0
+        top3_mismatch = 0.0
 
-        # 左侧区间
-        y0 = 0.0
-        af_low, af_high = y0, y0 + af / total
-        anf_low, anf_high = af_high, 1.0
-
-        # 右侧区间
-        y1 = 0.0
-        pf_low, pf_high = y1, y1 + pf / total
-        pnf_low, pnf_high = pf_high, 1.0
-
-        # 绘制柱子
-        ax.add_patch(plt.Rectangle((0.0, af_low), 0.05, af_high - af_low, color=COLOR_PRIMARY))
-        ax.add_patch(plt.Rectangle((0.0, anf_low), 0.05, anf_high - anf_low, color=COLOR_GRAY))
-        ax.add_patch(plt.Rectangle((0.95, pf_low), 0.05, pf_high - pf_low, color=COLOR_PRIMARY))
-        ax.add_patch(plt.Rectangle((0.95, pnf_low), 0.05, pnf_high - pnf_low, color=COLOR_GRAY))
-
-        # 流带函数
-        def ribbon(y_left_low, y_left_high, y_right_low, y_right_high, color):
-            xs = [0.05, 0.4, 0.6, 0.95]
-            ys1 = [y_left_low, y_left_low, y_right_low, y_right_low]
-            ys2 = [y_left_high, y_left_high, y_right_high, y_right_high]
-            ax.fill_between(xs, ys1, ys2, color=color, alpha=0.35)
-
-        # 分配流
-        ff_low, ff_high = af_low, af_low + counts["ff"] / total
-        fn_low, fn_high = ff_high, af_high
-        pf_ff_low, pf_ff_high = pf_low, pf_low + counts["ff"] / total
-        pf_nf_low, pf_nf_high = pf_ff_high, pf_high
-        pnf_fn_low, pnf_fn_high = pnf_low, pnf_low + counts["fn"] / total
-        pnf_nn_low, pnf_nn_high = pnf_fn_high, pnf_high
-
-        ribbon(ff_low, ff_high, pf_ff_low, pf_ff_high, COLOR_PRIMARY)
-        ribbon(fn_low, fn_high, pnf_fn_low, pnf_fn_high, COLOR_WARNING)
-        ribbon(anf_low, anf_low + counts["nf"] / total, pf_nf_low, pf_nf_high, COLOR_ACCENT)
-        ribbon(anf_low + counts["nf"] / total, anf_high, pnf_nn_low, pnf_nn_high, COLOR_LIGHT_GRAY)
-
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.axis("off")
-        ax.set_title(title, fontsize=9)
-
-    mechanisms = ["percent", "rank", "daws"]
-    fig, axes = plt.subplots(1, 3, figsize=(9.0, 3.0))
-    for ax, mech in zip(axes, mechanisms):
-        counts = {"ff": 0, "fn": 0, "nf": 0, "nn": 0}
         for season in sorted(df["season"].unique()):
             season_df = df[df["season"] == season].copy()
-            actual_finalists = set(get_finalists(season_df))
-            predicted = set(predict_finalists(season, mech))
-            for name in season_df["celebrity_name"].unique():
-                actual = name in actual_finalists
-                pred = name in predicted
-                if actual and pred:
-                    counts["ff"] += 1
-                elif actual and (not pred):
-                    counts["fn"] += 1
-                elif (not actual) and pred:
-                    counts["nf"] += 1
-                else:
-                    counts["nn"] += 1
-        title = {"percent": "Percent", "rank": "Rank", "daws": "DAWS"}[mech]
-        draw_alluvial(ax, counts, title)
+            actual_top3 = get_finalists(season_df)
+            if len(actual_top3) < 3:
+                continue
+            pred_top3 = predict_finalists(season, mechanism)
+            if len(pred_top3) < 3:
+                continue
+            seasons_count += 1
+            if pred_top3[0] != actual_top3[0]:
+                champ_change += 1
+            inter = len(set(pred_top3) & set(actual_top3))
+            top3_mismatch += 1.0 - (inter / 3.0)
+
+        # per-week elimination mismatch rate
+        elim_mismatch = 0
+        weeks_count = 0
+        for (season, week), wdf in season_week_groups:
+            active_df = wdf[wdf["active"]].copy()
+            if len(active_df) == 0:
+                continue
+            wk = posterior_df[(posterior_df["season"] == season) & (posterior_df["week"] == week)]
+            if wk.empty:
+                continue
+            elim_idx = [i for i, flag in enumerate(wk["is_eliminated_week"].to_numpy()) if flag]
+            if not elim_idx:
+                continue
+            weeks_count += 1
+            j_share = wk["judge_share"].to_numpy()
+            v_share = wk["fan_share_mean"].to_numpy()
+            if mechanism == "percent":
+                combined = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
+                elim_pred = int(np.argmin(combined))
+            elif mechanism == "rank":
+                j_rank = pd.Series(j_share).rank(ascending=False, method="average").to_numpy()
+                f_rank = (-v_share).argsort().argsort() + 1
+                elim_pred = int(np.argmax(j_rank + f_rank))
+            else:
+                mean_width = week_metrics_df[
+                    (week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)
+                ]["mean_hdi_width"].mean()
+                if np.isnan(mean_width):
+                    mean_width = 0.0
+                total_weeks = int(long_df[long_df["season"] == season]["week"].max())
+                alpha_t = compute_alpha_t(week, total_weeks, mean_width, alpha0, gamma, eta, alpha_min, alpha_max)
+                combined = alpha_t * j_share + (1 - alpha_t) * v_share
+                elim_pred = int(np.argmin(combined))
+            if elim_pred not in elim_idx:
+                elim_mismatch += 1
+
+        return {
+            "champ_change": (champ_change / seasons_count) if seasons_count else float("nan"),
+            "top3_mismatch": (top3_mismatch / seasons_count) if seasons_count else float("nan"),
+            "elim_mismatch": (elim_mismatch / weeks_count) if weeks_count else float("nan"),
+        }
+
+    mechs = ["percent", "rank", "daws"]
+    stats = {m: compute_outcome_metrics(m) for m in mechs}
+    labels = ["Champion change", "Top3 mismatch", "Elim mismatch"]
+    x = np.arange(len(labels))
+    width = 0.24
+    plt.figure(figsize=(6.4, 3.6))
+    plt.bar(x - width, [stats["percent"]["champ_change"], stats["percent"]["top3_mismatch"], stats["percent"]["elim_mismatch"]],
+            width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
+    plt.bar(x, [stats["rank"]["champ_change"], stats["rank"]["top3_mismatch"], stats["rank"]["elim_mismatch"]],
+            width, label="Rank", color=COLOR_GRAY, alpha=0.85)
+    plt.bar(x + width, [stats["daws"]["champ_change"], stats["daws"]["top3_mismatch"], stats["daws"]["elim_mismatch"]],
+            width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
+    plt.xticks(x, labels)
+    plt.ylim(0, 1)
+    plt.ylabel("Rate")
+    plt.title("Outcome changes under alternative mechanisms")
+    plt.legend(frameon=False, fontsize=8)
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_alluvial_finalists.pdf")
-    plt.close(fig)
+    plt.close()
 
     # =========================
     # 输出指标与中间结果
