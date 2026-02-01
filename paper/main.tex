@@ -259,7 +259,7 @@ Metrics (higher is better unless noted):
 \keyoutput{A shared metric interface allows direct comparison across mechanisms.}
 
 \begin{takeawaybox}
-\textbf{Methodology Alignment Box.} Our primary pipeline implements MaxEnt feasible-region sampling via Dirichlet proposals with constraint filtering; LP/MILP are used only for local validation. Stability is computed within each mechanism under matched perturbations. DAWS uses a public three-tier risk protocol based on $U_t$ with publishable quantile thresholds (P75/P90) and a final-week Red override; the judge-save curve uses a calibrated $\beta=1.8$ for illustration.
+\textbf{Methodology Alignment Box.} Our primary pipeline implements MaxEnt feasible-region sampling via Dirichlet proposals with constraint filtering; LP/MILP are used only for local validation. Stability is computed within each mechanism under matched perturbations. DAWS uses a public three-tier risk protocol based on $U_t$ with publishable quantile thresholds (P75/P90) and a final-week Red override; the judge-save curve uses a calibrated $\beta=3.5$ for illustration.
 \end{takeawaybox}
 
 \section{Model A: Feasible-Region Audit}
@@ -503,12 +503,13 @@ We use a calibrated $\beta$ in
 \begin{equation}
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
 \end{equation}
+In the Yellow risk tier, we treat judges as decisive gatekeepers and set $\beta=3.5$ to reflect a stronger corrective intent against popularity bias.
 
 % Judge-save 决策曲线
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
-\caption{Judges prefer higher score within the bottom two; the curve uses calibrated $\beta=1.8$ to illustrate sharpness.}
+\caption{Judges prefer higher score within the bottom two; the curve uses calibrated $\beta=3.5$ to illustrate sharper decisions in Yellow-tier weeks.}
 \end{figure}
 
 \keyoutput{DAWS tier protocol and calibrated judge-save behavior.}

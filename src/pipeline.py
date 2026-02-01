@@ -57,6 +57,7 @@ FAST_STRICT_MAX_SAMPLES = int(os.getenv("MCM_STRICT_MAX_SAMPLES", "600"))  # Str
 RULE_SWITCH_BOOT = int(os.getenv("MCM_RULE_BOOT", "200"))  # 规则切换置信带 bootstrap 次数
 RUN_SYNTHETIC_VALIDATION = os.getenv("MCM_SYNTHETIC", "0") != "0"  # 是否在主流程后运行 Synthetic Validation
 RUN_SYNTHETIC_ONLY = os.getenv("MCM_SYNTHETIC_ONLY", "0") != "0"  # 是否仅运行 Synthetic Validation
+RUN_DAWS_GRID = os.getenv("MCM_DAWS_GRID", "0") != "0"  # Whether to run DAWS grid search
 
 # DAWS 分段阈值与权重（强调可公开、可执行）
 DAWS_ALPHA_BASE = 0.40
@@ -64,7 +65,7 @@ DAWS_ALPHA_DISPUTE = 0.60
 DAWS_ALPHA_EXTREME = 0.30
 DAWS_U_P90 = 0.75
 DAWS_U_P97 = 0.90
-JUDGESAVE_BETA = 1.8
+JUDGESAVE_BETA = 3.5
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
@@ -2332,10 +2333,135 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     return summary
 
 
+
+# =========================
+# P1-Opt: Parameter sweep
+# =========================
+
+def run_parameter_grid_search() -> None:
+    """Grid search DAWS thresholds and base weight."""
+    log("Running DAWS Parameter Grid Search...")
+    ensure_dirs()
+    set_plot_style()
+
+    df = load_data()
+    long_df = build_long_df(df)
+    long_df["judge_share"] = long_df.groupby(["season", "week"])["judge_total"].transform(
+        lambda x: x / x.sum() if x.sum() > 0 else np.nan
+    )
+    season_week_groups = list(long_df.groupby(["season", "week"], sort=True))
+    season_max_week = long_df.groupby("season")["week"].max().to_dict()
+
+    samples_cache: Dict[Tuple[int, int], np.ndarray] = {}
+    week_metrics_cache: Dict[Tuple[int, int], float] = {}
+    fast_props = 150
+
+    log("Pre-calculating posterior samples for grid search...")
+    for (season, week), wdf in season_week_groups:
+        active_df = wdf[wdf["active"]].copy()
+        if len(active_df) == 0:
+            continue
+        samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, fast_props, RNG)
+        if len(samples) == 0:
+            continue
+        lower = np.quantile(samples, 0.025, axis=0)
+        upper = np.quantile(samples, 0.975, axis=0)
+        hdi_width = upper - lower
+        mean_hdi = float(np.mean(hdi_width))
+        key = (int(season), int(week))
+        samples_cache[key] = samples
+        week_metrics_cache[key] = mean_hdi
+
+    if not week_metrics_cache:
+        log("Grid search skipped: no feasible samples.")
+        return
+
+    all_hdis = pd.Series(list(week_metrics_cache.values()))
+    p90_quantiles = np.linspace(0.60, 0.95, 8)
+    alpha_base_range = [0.35, 0.40, 0.45, 0.50]
+
+    results: List[Dict[str, float]] = []
+    log(f"Starting grid search: {len(p90_quantiles)} x {len(alpha_base_range)} combinations...")
+
+    for q90 in p90_quantiles:
+        for a_base in alpha_base_range:
+            thresh_p90 = float(all_hdis.quantile(q90))
+            q97 = min(0.99, q90 + (1 - q90) * 0.5)
+            thresh_p97 = float(all_hdis.quantile(q97))
+            if thresh_p97 < thresh_p90:
+                thresh_p97 = thresh_p90
+
+            metrics_sum = {"agency": 0.0, "integrity": 0.0, "stability": 0.0, "count": 0}
+            for (season, week), wdf in season_week_groups:
+                key = (int(season), int(week))
+                if key not in samples_cache:
+                    continue
+                mean_width = week_metrics_cache[key]
+                samples = samples_cache[key]
+                active_df = wdf[wdf["active"]].copy()
+                final_week = int(season_max_week.get(int(season), int(week)))
+                daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, thresh_p90, thresh_p97)
+                res = evaluate_mechanisms(samples, active_df, a_base, daws_tier, EPSILON, RNG)
+                if not res:
+                    continue
+                m = res["count"]
+                metrics_sum["agency"] += res["daws"]["agency"] * m
+                metrics_sum["integrity"] += res["daws"]["judge_integrity"] * m
+                metrics_sum["stability"] += (1.0 - res["daws"]["instability"]) * m
+                metrics_sum["count"] += m
+
+            if metrics_sum["count"] > 0:
+                n = metrics_sum["count"]
+                score_agency = metrics_sum["agency"] / n
+                score_integrity = metrics_sum["integrity"] / n
+                score_stability = metrics_sum["stability"] / n
+                final_score = 0.4 * score_integrity + 0.4 * score_agency + 0.2 * score_stability
+                results.append({
+                    "q90": float(q90),
+                    "q97": float(q97),
+                    "alpha_base": float(a_base),
+                    "score": float(final_score),
+                    "integrity": float(score_integrity),
+                    "agency": float(score_agency),
+                    "stability": float(score_stability),
+                })
+
+    res_df = pd.DataFrame(results)
+    if res_df.empty:
+        log("Grid search finished: no results.")
+        return
+
+    best_row = res_df.loc[res_df["score"].idxmax()]
+    log("\n" + "=" * 40)
+    log("OPTIMAL PARAMETERS FOUND:")
+    log(f"Best P90 Quantile: {best_row['q90']:.2f}")
+    log(f"Best Base Alpha:   {best_row['alpha_base']:.2f}")
+    log(f"Resulting Metrics -> Integrity: {best_row['integrity']:.3f}, Agency: {best_row['agency']:.3f}, Stability: {best_row['stability']:.3f}")
+    log("=" * 40 + "\n")
+
+    res_df.to_csv(OUTPUT_DIR / "grid_search_results.csv", index=False, encoding="utf-8")
+
+    try:
+        pivot = res_df.pivot(index="alpha_base", columns="q90", values="score")
+        plt.figure(figsize=(6, 4.5))
+        sns.heatmap(pivot, annot=True, fmt=".3f", cmap="viridis")
+        plt.title("Parameter Optimization: DAWS Score Surface")
+        plt.xlabel("Trigger Threshold (Quantile)")
+        plt.ylabel("Base Judge Weight")
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_param_optimization.pdf")
+        plt.close()
+        log("Optimization heatmap saved.")
+    except Exception as exc:
+        log(f"Could not plot heatmap: {exc}")
+
 if __name__ == "__main__":
     if RUN_SYNTHETIC_ONLY:
         synthetic_data_validation()
     else:
+        if RUN_DAWS_GRID:
+            run_parameter_grid_search()
+
         scales = parse_scales(os.getenv("MCM_SCALES"))
         if scales:
             results = []
