@@ -180,12 +180,12 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \noindent\begin{minipage}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_mechanism_radar.pdf}
-\captionof{figure}{机制权衡（雷达图）。}
+\captionof{figure}{机制权衡（雷达图）（轴为公平/主权/稳定，数值为周度加权平均）。}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_mechanism_compare.pdf}
-\captionof{figure}{机制对比（数值）。}
+\captionof{figure}{机制对比（数值）（柱状对比三指标，便于直观比较）。}
 \end{minipage}
 \clearpage
 \tableofcontents
@@ -278,7 +278,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 
 \subsection{Percent 规则 LP 审计}
 \begin{algorithm}[H]
-\caption{Percent 周度多面体审计}
+\caption{Percent 周度多面体审计（LP 约束与上下界，输出可行区间与松弛度）。}
 \begin{algorithmic}[1]
 \Require $C_t, J_{i,t}, E_t, \alpha, \epsilon$
 \Ensure 边界 $(L_i,U_i)$，Slack $S_t^*$，采样接口
@@ -294,7 +294,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 
 \subsection{Rank 规则 MILP 与有序 share}
 \begin{algorithm}[H]
-\caption{Rank 可行序列到 share 采样}
+\caption{Rank 可行序列到 share 采样（MILP 枚举可行序列后再采样）。}
 \begin{algorithmic}[1]
 \Require Rank 规则周数据
 \Ensure fan share 后验样本
@@ -332,7 +332,7 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_fast_vs_strict.pdf}
-\caption{Fast 与 Strict 后验均值对比，偏离程度有限。}
+\caption{Fast 与 Strict 后验均值对比，偏离程度有限（对角线为一致，偏离衡量近似误差）。}
 \end{figure}
 
 \subsection{可识别性与可行质量}
@@ -340,13 +340,13 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.96\linewidth]{figures/fig_uncertainty_heatmap.pdf}
-\caption{不确定性集中于少数周；空白单元表示该赛季不存在该周。}
+\caption{不确定性集中于少数周；空白单元表示该赛季不存在该周（颜色越亮=HDI 宽度更大）。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\linewidth]{figures/fig_hdi_distribution.pdf}
-\caption{周层面 HDI 宽度分布，极端周占比有限。}
+\caption{周层面 HDI 宽度分布，极端周占比有限（虚线为 Q1/中位/Q3/P90）。}
 \end{figure}
 
 \subsection{平滑后验}
@@ -356,7 +356,7 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{figures/fig_sigma_sensitivity.pdf}
-\caption{结论对 $\sigma$ 较为稳健。}
+\caption{结论对 $\sigma$ 较为稳健（横轴平滑参数，纵轴平均 HDI）。}
 \end{figure}
 
 \subsection{规则切换推断}
@@ -369,15 +369,15 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_rule_switch.pdf}
-\caption{点估计。}
+\caption{点估计（HMM 推断 $P(\text{rank+save})$ 的季节曲线）。}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_rule_switch_ci.pdf}
-\caption{置信带。}
+\caption{置信带（Bootstrap 90\% 区间）。}
 \end{subfigure}
-\caption{规则切换的探索性概率与不确定性区间；主分析采用第 28 季为切换点。}
+\caption{规则切换的探索性概率与不确定性区间；主分析采用第 28 季为切换点（虚线标记）。}
 \end{figure}
 
 \keyoutput{多面体边界、Slack、后验样本、规则切换概率。}
@@ -387,25 +387,25 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{figures/fig_conflict_map.pdf}
-\caption{淘汰并非总与粉丝最低支持对齐。}
+\caption{淘汰并非总与粉丝最低支持对齐（颜色区分淘汰/未淘汰，点大小=不确定性）。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{figures/fig_conflict_combo.pdf}
-\caption{冲突图叠加不确定性（点大小）与错误淘汰标注（外圈）。}
+\caption{冲突图叠加不确定性（点大小）与错误淘汰标注（外圈表示“非粉丝最低却被淘汰”）。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.96\linewidth]{figures/fig_controversy_ridgeline.pdf}
-\caption{争议人物周序后验密度显示显著不确定性。}
+\caption{争议人物周序后验密度显示显著不确定性（橙色=淘汰周，峰值位置=粉丝支持度）。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.96\linewidth]{figures/fig_wrongful_heatmap.pdf}
-\caption{部分周存在持续的民主张力；空白单元表示该赛季不存在该周。}
+\caption{部分周存在持续的民主张力；空白单元表示该赛季不存在该周（颜色越亮=错误淘汰概率更高）。}
 \end{figure}
 
 \keyoutput{粉丝占比后验、HDI 与错误淘汰概率。}
@@ -420,18 +420,18 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/fig_alluvial_finalists.pdf}
-\caption{机制选择会改变决赛与冠军结果。}
+\caption{机制选择会改变决赛与冠军结果（不同机制下最终席位存在差异）。}
 \vspace{0.4em}
 \begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_pareto_2d.pdf}
-\caption{观众参与度与稳定性的 Pareto 权衡，颜色表示评委一致性。}
+\caption{观众参与度与稳定性的 Pareto 权衡，颜色表示评委一致性（曲线为 $\alpha$ 扫描，星标为 DAWS）。}
 \end{subfigure}
 \hfill
 \begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_mechanism_compare.pdf}
-\caption{机制对比（数值）。}
+\caption{机制对比（数值）（三机制在公平/主权/稳定上的对比）。}
 \end{subfigure}
 \end{figure}
 
@@ -447,13 +447,13 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.95\linewidth]{figures/fig_pro_diff_forest.pdf}
-\caption{职业舞伴效应差异（粉丝 - 评委）。}
+\caption{职业舞伴效应差异（粉丝 - 评委）（正值=更受粉丝偏好，负值=更受评委偏好）。}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_feature_scatter.pdf}
-\caption{标注离对角线最远的特征以突出差异。}
+\caption{标注离对角线最远的特征以突出差异（远离对角线=评委/粉丝效应不一致）。}
 \end{figure}
 
 \subsection{预测补充：GBDT}
@@ -461,7 +461,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_auc_forward.pdf}
-\caption{分季 AUC 表现稳定。}
+\caption{分季 AUC 表现稳定（前向链式验证）。}
 \end{figure}
 
 \keyoutput{双模型对比与任务 3 的直接回答。}
@@ -487,7 +487,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
-\caption{Judge-save 决策曲线。}
+\caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率）。}
 \end{figure}
 
 \keyoutput{DAWS 方案、性质与 judge-save 行为刻画。}
@@ -497,7 +497,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_ppc_summary.pdf}
-\caption{后验预测检验结果。}
+\caption{后验预测检验结果（Coverage 越高越好，Brier 越低越好）。}
 \end{figure}
 
 \subsection{规模对比实验}
@@ -505,7 +505,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/fig_scale_benchmark.pdf}
-\caption{不同采样规模下的时间、误差、稳定性与匹配度对比。}
+\caption{不同采样规模下的时间、误差、稳定性与匹配度对比（虚线为折中规模）。}
 \end{figure}
 
 \keyoutput{敏感性曲线与后验预测覆盖率。}
