@@ -59,6 +59,7 @@ DAWS_ALPHA_DISPUTE = 0.60
 DAWS_ALPHA_EXTREME = 0.70
 DAWS_U_P90 = 0.90
 DAWS_U_P97 = 0.97
+JUDGESAVE_BETA = 1.8
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
@@ -127,6 +128,16 @@ def parse_elim_week(result: str) -> int | None:
         if m:
             return int(m.group(1))
     return None
+
+
+def clean_pro_name(name: str) -> str:
+    """清洗舞伴姓名：去括号说明、去复合名。"""
+    if not isinstance(name, str):
+        return str(name)
+    cleaned = re.sub(r"\s*\(.*?\)", "", name)
+    if "/" in cleaned:
+        cleaned = cleaned.split("/")[0]
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def load_data() -> pd.DataFrame:
@@ -323,7 +334,7 @@ def evaluate_mechanisms(
     a_idx = bottom_two[:, 0]
     b_idx = bottom_two[:, 1]
     diff = j_scores[b_idx] - j_scores[a_idx]
-    p_elim_a = 1 / (1 + np.exp(1.8 * diff))
+    p_elim_a = 1 / (1 + np.exp(JUDGESAVE_BETA * diff))
     rand_u = rng.random(m)
     elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
 
@@ -380,7 +391,7 @@ def evaluate_mechanisms(
     a_n = bottom_two_noise[:, 0]
     b_n = bottom_two_noise[:, 1]
     diff_n = j_scores[b_n] - j_scores[a_n]
-    p_elim_a_n = 1 / (1 + np.exp(1.8 * diff_n))
+    p_elim_a_n = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_n))
     rand_u_n = rng.random(m)
     elim_noise_s = np.where(rand_u_n < p_elim_a_n, a_n, b_n)
 
@@ -1303,6 +1314,33 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.savefig(FIG_DIR / "fig_rule_switch.pdf")
     plt.close()
 
+    # DAWS trigger schedule
+    log("Rendering DAWS trigger schedule...")
+    week_u = week_metrics_df.groupby("week")["mean_hdi_width"].mean().reset_index()
+    if not week_u.empty:
+        week_u = week_u.sort_values("week")
+        alpha_schedule = week_u["mean_hdi_width"].apply(
+            lambda u: compute_alpha_t(u, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
+        ).to_numpy()
+        fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.6), sharex=True)
+        axes[0].plot(week_u["week"], week_u["mean_hdi_width"], marker="o", color=COLOR_PRIMARY)
+        if u_p90 > 0:
+            axes[0].axhline(u_p90, color=COLOR_ACCENT, linestyle="--", linewidth=1.0, label="P90 threshold")
+        if u_p97 > 0:
+            axes[0].axhline(u_p97, color=COLOR_WARNING, linestyle="--", linewidth=1.0, label="P97 threshold")
+        axes[0].set_ylabel("U_t (mean HDI width)")
+        axes[0].set_title("DAWS trigger: uncertainty and tiered judge weight")
+        axes[0].legend(frameon=False, fontsize=8, loc="upper right")
+
+        axes[1].step(week_u["week"], alpha_schedule, where="mid", color=COLOR_PRIMARY_DARK, linewidth=1.6)
+        axes[1].set_ylabel("Alpha_t (judge weight)")
+        axes[1].set_xlabel("Week")
+        axes[1].set_ylim(0.45, 0.75)
+        axes[1].set_yticks(sorted(set([alpha_base, alpha_dispute, alpha_extreme])))
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_daws_trigger.pdf")
+        plt.close(fig)
+
     # Mechanism radar
     def radar_plot(stats_dict: Dict[str, Dict[str, float]], labels: List[str], fname: str) -> None:
         categories = ["agency", "judge_integrity", "stability"]
@@ -1400,12 +1438,6 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.close()
 
     # Pro dancer effects difference (Top 20)
-    def clean_pro_name(name: str) -> str:
-        base = re.sub(r"\s*\(.*\)$", "", str(name)).strip()
-        if "/" in base:
-            base = base.split("/")[0].strip()
-        return base
-
     pro_effects_sorted = pro_effects.copy()
     pro_effects_sorted["pro_clean"] = pro_effects_sorted["pro"].apply(clean_pro_name)
     pro_effects_sorted = (
@@ -1470,8 +1502,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # Judge-save curve (示意)
     xs = np.linspace(-10, 10, 200)
-    beta = 1.8
-    ys = 1 / (1 + np.exp(beta * xs))
+    ys = 1 / (1 + np.exp(JUDGESAVE_BETA * xs))
     plt.figure(figsize=(5.0, 3.4))
     plt.plot(xs, ys, color=COLOR_PRIMARY)
     plt.xlabel("Judge score difference")
@@ -1543,6 +1574,122 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_controversy_ridgeline.pdf")
     plt.close(fig)
+
+    # =========================
+    # Counterfactual elimination risk timelines
+    # =========================
+    log("Rendering counterfactual risk timelines...")
+
+    def compute_elim_probs(samples_arr: np.ndarray, active_df: pd.DataFrame, alpha_t: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        m = len(samples_arr)
+        n = len(active_df)
+        if m == 0 or n == 0:
+            return (np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n))
+
+        j_share = active_df["judge_share"].to_numpy()
+        j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+        j_scores = active_df["judge_total"].to_numpy()
+        j_share_matrix = np.tile(j_share, (m, 1))
+
+        comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples_arr
+        elim_p = np.argmin(comb_percent, axis=1)
+        prob_p = np.bincount(elim_p, minlength=n) / m
+
+        fan_rank = np.argsort(np.argsort(-samples_arr, axis=1), axis=1) + 1
+        comb_rank = fan_rank + np.tile(j_rank, (m, 1))
+        elim_r = np.argmax(comb_rank, axis=1)
+        prob_r = np.bincount(elim_r, minlength=n) / m
+
+        # judge-save expected elimination probability (no extra RNG)
+        bottom_two = np.argpartition(comb_rank, -2, axis=1)[:, -2:]
+        a_idx = bottom_two[:, 0]
+        b_idx = bottom_two[:, 1]
+        diff = j_scores[b_idx] - j_scores[a_idx]
+        p_elim_a = 1 / (1 + np.exp(JUDGESAVE_BETA * diff))
+        prob_s = np.zeros(n)
+        for i in range(n):
+            mask_a = (a_idx == i)
+            mask_b = (b_idx == i)
+            if mask_a.any():
+                prob_s[i] += p_elim_a[mask_a].sum()
+            if mask_b.any():
+                prob_s[i] += (1 - p_elim_a[mask_b]).sum()
+        prob_s = prob_s / m
+
+        comb_daws = alpha_t * j_share_matrix + (1 - alpha_t) * samples_arr
+        elim_d = np.argmin(comb_daws, axis=1)
+        prob_d = np.bincount(elim_d, minlength=n) / m
+
+        return prob_p, prob_r, prob_s, prob_d
+
+    risk_records: List[Dict[str, object]] = []
+    for name in controversy_names:
+        sub = posterior_df[posterior_df["celebrity_name"] == name]
+        if sub.empty:
+            continue
+        for (season, week), _ in sub.groupby(["season", "week"]):
+            wdf = long_df[(long_df["season"] == season) & (long_df["week"] == week)]
+            active_df = wdf[wdf["active"]].copy()
+            if active_df.empty:
+                continue
+            active_df = active_df.reset_index(drop=True)
+            idx_list = active_df.index[active_df["celebrity_name"] == name].tolist()
+            if not idx_list:
+                continue
+            c_idx = int(idx_list[0])
+
+            key = (int(season), int(week))
+            samples = samples_cache.get(key)
+            if samples is None or len(samples) == 0:
+                samples, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+                samples_cache[key] = samples
+            if len(samples) == 0:
+                continue
+            samples_use = samples
+            if len(samples_use) > MAX_SAMPLES_PER_WEEK:
+                idx = RNG.choice(len(samples_use), size=MAX_SAMPLES_PER_WEEK, replace=False)
+                samples_use = samples_use[idx]
+
+            mean_width = week_metrics_df[
+                (week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)
+            ]["mean_hdi_width"].mean()
+            if np.isnan(mean_width):
+                mean_width = 0.0
+            alpha_t = compute_alpha_t(mean_width, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
+
+            prob_p, prob_r, prob_s, prob_d = compute_elim_probs(samples_use, active_df, alpha_t)
+            risk_records.extend([
+                {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Percent", "prob": float(prob_p[c_idx])},
+                {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Rank", "prob": float(prob_r[c_idx])},
+                {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Save", "prob": float(prob_s[c_idx])},
+                {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "DAWS", "prob": float(prob_d[c_idx])},
+            ])
+
+    risk_df = pd.DataFrame(risk_records)
+    if not risk_df.empty:
+        fig, axes = plt.subplots(2, 2, figsize=(7.6, 5.6), sharex=False, sharey=True)
+        axes = axes.flatten()
+        color_map = {"Percent": COLOR_PRIMARY, "Rank": COLOR_GRAY, "Save": COLOR_ACCENT, "DAWS": COLOR_WARNING}
+        for ax, name in zip(axes, controversy_names):
+            sub = risk_df[risk_df["celebrity_name"] == name]
+            if sub.empty:
+                ax.text(0.5, 0.5, f"{name}\\nNot Found", ha="center", va="center")
+                ax.axis("off")
+                continue
+            season_id = int(sub["season"].iloc[0])
+            for mech in ["Percent", "Rank", "Save", "DAWS"]:
+                line = sub[sub["mechanism"] == mech].sort_values("week")
+                ax.plot(line["week"], line["prob"], marker="o", linewidth=1.2, label=mech, color=color_map[mech])
+            ax.set_title(f"{name} (Season {season_id})", fontsize=9)
+            ax.set_xlabel("Week")
+            ax.set_ylim(0, 1)
+        axes[0].set_ylabel("P(eliminated)")
+        axes[2].set_ylabel("P(eliminated)")
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="upper center", ncol=4, frameon=False, fontsize=8)
+        plt.tight_layout(rect=[0, 0, 1, 0.94])
+        plt.savefig(FIG_DIR / "fig_counterfactual_risk_timeline.pdf")
+        plt.close(fig)
 
     # =========================
     # Finalists outcome changes (bar chart)

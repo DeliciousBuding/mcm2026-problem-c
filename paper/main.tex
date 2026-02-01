@@ -429,6 +429,13 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{equation}
 We compute a conflict index (Kendall $\tau$), viewer agency, judge integrity, stability, and deficit for percent, rank, rank+save, and DAWS.
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.96\linewidth]{figures/fig_counterfactual_risk_timeline.pdf}
+\caption{Counterfactual elimination risk over weeks for high-profile cases (percent, rank, judge-save, and DAWS).}
+\end{figure}
+
+
 % 机制差异的结果迁移图（占位保留）
 \begin{figure}[H]
 \centering
@@ -496,6 +503,12 @@ We define
 \end{cases}
 \end{equation}
 where $q_{90},q_{97}$ are quantiles of $U_t$ and $(\alpha_0,\alpha_1,\alpha_2)$ are fixed public tiers.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
+\caption{DAWS trigger schedule: weekly uncertainty $U_t$ with public thresholds and the resulting tiered judge weights.}
+\end{figure}
+
 \begin{proposition}[Monotonicity]
 If both judge share and fan share of a contestant increase, their DAWS score does not decrease.
 \end{proposition}

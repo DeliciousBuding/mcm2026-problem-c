@@ -421,6 +421,12 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 
 \begin{figure}[H]
 \centering
+\includegraphics[width=0.96\linewidth]{figures/fig_counterfactual_risk_timeline.pdf}
+\caption{争议人物的反事实淘汰风险时间线（纵轴为每周被淘汰概率，四条线对应 percent/rank/judge-save/DAWS；用于回答“规则改变是否改变淘汰风险”）。}
+\end{figure}
+
+\begin{figure}[H]
+\centering
 \includegraphics[width=\linewidth]{figures/fig_alluvial_finalists.pdf}
 \caption{机制选择会改变决赛与冠军结果（冠军改变率、Top3 不一致率与淘汰不一致率）。}
 \vspace{0.4em}
@@ -479,6 +485,11 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{cases}
 \end{equation}
 其中 $q_{90},q_{97}$ 为 $U_t$ 的分位阈值（仅在最不确定的周触发更高权重）。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
+\caption{DAWS 触发与权重档位（上：$U_t$ 与公开阈值；下：对应的评委权重档位阶梯，常规/争议/极端周）。}
+\end{figure}
 \begin{proposition}[单调性]
 评委与粉丝占比同时上升时，DAWS 得分不下降。
 \end{proposition}
