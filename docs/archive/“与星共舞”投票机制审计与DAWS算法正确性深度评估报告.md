@@ -148,13 +148,13 @@ $$P(E=a | \{a,b\}) = \sigma(\beta(J_b - J_a))$$
 
 ## 5. DAWS 机制审计：控制理论视角的评估
 
-针对现有机制的缺陷，论文提出了 DAWS（Designing the DWTS Voting Mechanism），核心在于引入动态权重 $\alpha_t$ 。
+针对现有机制的缺陷，论文提出了 DAWS（Designing the DWTS Voting Mechanism）。**注：本节为历史方案备查，当前版本已改为级联协议（Finale 覆盖 + 冲突触发 Judge Save + 默认 Percent），V/U 仅用于披露与审计预算，不触发干预。**
 
 ### 5.1 动态权重的控制逻辑
 
 公式：$C_{i,t} = \alpha_t J_{i,t} + (1-\alpha_t) V_{i,t}$
 
-其中 $\alpha_t$ 根据“不确定性指数” $U_t$ 进行调节。
+其中 $\alpha_t$ 根据“不确定性指数” $U_t$ 进行调节（历史设想，非当前实现）。
 
 - **控制理论隐喻：** 我们可以将 DWTS 投票系统视为一个动态控制系统。
     - **被控对象：** 淘汰结果。
