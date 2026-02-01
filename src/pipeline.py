@@ -57,14 +57,13 @@ FAST_STRICT_MAX_SAMPLES = int(os.getenv("MCM_STRICT_MAX_SAMPLES", "600"))  # Str
 RULE_SWITCH_BOOT = int(os.getenv("MCM_RULE_BOOT", "200"))  # 规则切换置信带 bootstrap 次数
 RUN_SYNTHETIC_VALIDATION = os.getenv("MCM_SYNTHETIC", "0") != "0"  # 是否在主流程后运行 Synthetic Validation
 RUN_SYNTHETIC_ONLY = os.getenv("MCM_SYNTHETIC_ONLY", "0") != "0"  # 是否仅运行 Synthetic Validation
-DAWS_RISK_THRESHOLD = float(os.getenv("MCM_DAWS_THRESHOLD", "0.4"))  # DAWS 风险阈值（HDI 宽度）
 
 # DAWS 分段阈值与权重（强调可公开、可执行）
-DAWS_ALPHA_BASE = 0.50
+DAWS_ALPHA_BASE = 0.40
 DAWS_ALPHA_DISPUTE = 0.60
-DAWS_ALPHA_EXTREME = 0.70
-DAWS_U_P90 = 0.90
-DAWS_U_P97 = 0.97
+DAWS_ALPHA_EXTREME = 0.30
+DAWS_U_P90 = 0.75
+DAWS_U_P97 = 0.90
 JUDGESAVE_BETA = 1.8
 
 # 颜色规范（与图表规范一致）
@@ -271,13 +270,23 @@ def compute_alpha_t(mean_width: float,
     return float(alpha_base)
 
 
-def determine_daws_tier(mean_width: float, week: int, final_week: int) -> Tuple[str, str]:
-    """根据风险指数与周次给出 DAWS 档位与动作。"""
+def determine_daws_tier(
+    mean_width: float,
+    week: int,
+    final_week: int,
+    u_p90: float,
+    u_p97: float,
+) -> Tuple[str, str]:
+    """Return DAWS tier/action based on weekly uncertainty and thresholds."""
     if week >= final_week:
         return "Red", "Audience Only"
-    if mean_width < DAWS_RISK_THRESHOLD:
+    if u_p90 <= 0 and u_p97 <= 0:
         return "Green", "Standard 50/50"
-    return "Yellow", "Activate Judge Save"
+    if mean_width >= u_p97:
+        return "Red", "Audience Only"
+    if mean_width >= u_p90:
+        return "Yellow", "Activate Judge Save"
+    return "Green", "Standard 50/50"
 
 
 def apply_percent_mask(
@@ -1048,7 +1057,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             season = int(row["season"])
             week = int(row["week"])
             final_week = int(season_max_week.get(season, week))
-            tier_label, action = determine_daws_tier(mean_width, week, final_week)
+            tier_label, action = determine_daws_tier(mean_width, week, final_week, u_p90, u_p97)
             tier_records.append({
                 "Season": season,
                 "Week": week,
@@ -1213,7 +1222,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     season_metrics_list: List[Dict[str, Any]] = []
 
     # DAWS 固定权重（Green 档位）
-    alpha_t = ALPHA_PERCENT
+    alpha_t = DAWS_ALPHA_BASE
 
     for (season, week), wdf in season_week_groups:
         active_df = wdf[wdf["active"]].copy()
@@ -1232,7 +1241,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         if np.isnan(mean_width):
             mean_width = 0.0
         final_week = int(season_max_week.get(int(season), int(week)))
-        daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week)
+        daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, u_p90, u_p97)
 
         eval_res = evaluate_mechanisms(samples, active_df, alpha_t, daws_tier, EPSILON, RNG)
         if not eval_res:
@@ -1365,10 +1374,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             if np.isnan(mean_width):
                 mean_width = 0.0
             final_week = int(season_max_week.get(int(season), int(week)))
-            daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week)
+            daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, u_p90, u_p97)
 
-            res_fast = evaluate_mechanisms(fast_samples, active_df, ALPHA_PERCENT, daws_tier, EPSILON, rng)
-            res_strict = evaluate_mechanisms(strict_samples, active_df, ALPHA_PERCENT, daws_tier, EPSILON, rng)
+            res_fast = evaluate_mechanisms(fast_samples, active_df, DAWS_ALPHA_BASE, daws_tier, EPSILON, rng)
+            res_strict = evaluate_mechanisms(strict_samples, active_df, DAWS_ALPHA_BASE, daws_tier, EPSILON, rng)
 
             for key in ["percent", "rank", "daws"]:
                 metrics_fast[key]["fairness_sum"] += res_fast[key]["fairness"] * res_fast["count"]
@@ -1666,11 +1675,12 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             mean_width = float(row["mean_hdi_width"])
             if np.isnan(mean_width):
                 mean_width = 0.0
-            tier_label, _ = determine_daws_tier(mean_width, int(row["week"]), max_week_all)
+            tier_label, _ = determine_daws_tier(mean_width, int(row["week"]), max_week_all, u_p90, u_p97)
             tiers.append(tier_map[tier_label])
         fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.6), sharex=True)
         axes[0].plot(week_u["week"], week_u["mean_hdi_width"], marker="o", color=COLOR_PRIMARY)
-        axes[0].axhline(DAWS_RISK_THRESHOLD, color=COLOR_ACCENT, linestyle="--", linewidth=1.0, label="Risk threshold")
+        axes[0].axhline(u_p90, color=COLOR_ACCENT, linestyle="--", linewidth=1.0, label=f"P{int(DAWS_U_P90 * 100)} threshold")
+        axes[0].axhline(u_p97, color=COLOR_WARNING, linestyle="--", linewidth=1.0, label=f"P{int(DAWS_U_P97 * 100)} threshold")
         axes[0].set_ylabel("U_t (mean HDI width)")
         axes[0].set_title("DAWS trigger: risk control tiers")
         axes[0].legend(frameon=False, fontsize=8, loc="upper right")
@@ -1975,12 +1985,16 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         elim_f = np.argmin(samples_arr, axis=1)
         prob_f = np.bincount(elim_f, minlength=n) / m
 
+        comb_daws = DAWS_ALPHA_BASE * j_share_matrix + (1 - DAWS_ALPHA_BASE) * samples_arr
+        elim_d_green = np.argmin(comb_daws, axis=1)
+        prob_d_green = np.bincount(elim_d_green, minlength=n) / m
+
         if daws_tier == "Red":
             prob_d = prob_f
         elif daws_tier == "Yellow":
             prob_d = prob_s
         else:
-            prob_d = prob_p
+            prob_d = prob_d_green
 
         return prob_p, prob_r, prob_s, prob_d
 
@@ -2018,7 +2032,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             if np.isnan(mean_width):
                 mean_width = 0.0
             final_week = int(season_max_week.get(int(season), int(week)))
-            daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week)
+            daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, u_p90, u_p97)
 
             prob_p, prob_r, prob_s, prob_d = compute_elim_probs(samples_use, active_df, daws_tier)
             risk_records.extend([
@@ -2084,7 +2098,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             if np.isnan(mean_width):
                 mean_width = 0.0
             final_week = int(season_max_week.get(int(season), int(last_week)))
-            daws_tier, _ = determine_daws_tier(mean_width, int(last_week), final_week)
+            daws_tier, _ = determine_daws_tier(mean_width, int(last_week), final_week, u_p90, u_p97)
             if daws_tier == "Red":
                 combined = v_share
             else:
@@ -2147,7 +2161,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 if np.isnan(mean_width):
                     mean_width = 0.0
                 final_week = int(season_max_week.get(int(season), int(week)))
-                daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week)
+                daws_tier, _ = determine_daws_tier(mean_width, int(week), final_week, u_p90, u_p97)
                 if daws_tier == "Red":
                     elim_pred = int(np.argmin(v_share))
                 elif daws_tier == "Yellow":
