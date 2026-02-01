@@ -259,7 +259,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 \keyoutput{统一指标接口用于机制对比。}
 
 \begin{takeawaybox}
-\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用基于 $U_t$ 的三档风控协议（P75/P90 分位阈值 + 决赛红档覆盖），judge-save 曲线使用校准的 $\beta=3.5$ 作为示意。
+\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用基于 $U_t$ 的三档风控协议（P75/P90 分位阈值 + 决赛红档覆盖），judge-save 曲线使用校准的 $\beta=4.0$ 作为示意。
 \end{takeawaybox}
 
 \section{模型A：可行区域审计}
@@ -486,11 +486,11 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \begin{equation}
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
 \end{equation}
-在黄档风险周，我们将评委视为更果断的把关者，设定 $\beta=3.5$，以体现其纠正明显人气偏差的意图。
+在黄档风险周，我们将评委视为更果断的把关者，设定 $\beta=4.0$，以体现其纠正明显人气偏差的意图。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
-\caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率；示意曲线使用 $\beta=3.5$，分差越大则低分选手被淘汰概率越高）。}
+\caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率；示意曲线使用 $\beta=4.0$，分差越大则低分选手被淘汰概率越高）。}
 \end{figure}
 
 \keyoutput{DAWS 档位协议与校准的 judge-save 行为刻画。}
@@ -539,6 +539,15 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \includegraphics[width=0.85\linewidth]{figures/fig_sigma_sensitivity.pdf}
 \caption{$\sigma$ 敏感性：结论对平滑参数较为稳健（横轴为 $\sigma$，纵轴为平均 HDI）。}
 \label{fig:sigma-sensitivity}
+\end{figure}
+
+\subsection{DAWS 参数扫描}
+我们对 DAWS 的触发分位阈值与基准权重进行网格扫描，以展示设计空间。扫描结果显示较高的触发阈值（如 $P_{90}\approx0.95$）在复合指标上更优，但我们主动选择更“积极”的阈值（$P_{90}=0.75$），确保风控协议在足够多的周次介入，从而提升可执行性与可见度。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_param_optimization.pdf}
+\caption{DAWS 参数空间扫描：热力图为综合效用分数（公正性 + 能动性 + 稳定性）。}
+\label{fig:param-optimization}
 \end{figure}
 
 \section{预测校准}\label{app:auc}
