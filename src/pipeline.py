@@ -60,12 +60,12 @@ RUN_SYNTHETIC_ONLY = os.getenv("MCM_SYNTHETIC_ONLY", "0") != "0"  # 是否仅运
 RUN_DAWS_GRID = os.getenv("MCM_DAWS_GRID", "0") != "0"  # Whether to run DAWS grid search
 
 # DAWS 分段阈值与权重（强调可公开、可执行）
-DAWS_ALPHA_BASE = 0.60
+DAWS_ALPHA_BASE = 0.65
 DAWS_ALPHA_DISPUTE = 0.60
 DAWS_ALPHA_EXTREME = 0.30
 DAWS_U_P90 = 0.80
 DAWS_U_P97 = 0.90
-JUDGESAVE_BETA = 2.0
+JUDGESAVE_BETA = 4.0
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"

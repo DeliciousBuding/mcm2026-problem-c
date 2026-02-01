@@ -259,7 +259,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 \keyoutput{统一指标接口用于机制对比。}
 
 \begin{takeawaybox}
-\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用基于 $U_t$ 的三档风控协议（P80/P90 分位阈值 + 决赛红档覆盖），judge-save 曲线使用校准的 $\beta=2.0$ 作为示意。
+\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用“亲公正性安全网”设计，公开分位阈值（P80/P90），Green 档基准权重 $\alpha=0.65$，并在决赛周强制红档；judge-save 曲线使用校准的 $\beta=4.0$ 作为示意。
 \end{takeawaybox}
 
 \section{模型A：可行区域审计}
@@ -457,11 +457,11 @@ GBDT 仅作为协变量有效性的鲁棒性检验，细节置于附录~\ref{app
 \takeaway{DAWS 是三档风控协议：红/黄/绿，对应清晰可执行的动作。}
 我们定义风险指数 $R_t=U_t$（周度 HDI 宽度），并采用离散规则：
 \begin{itemize}[leftmargin=2em]
-\item \textbf{Tier 1（绿）.} $R_t<Q_{0.80}$ \;\;$\Rightarrow$ 常规 50/50（评委/观众各半）。
+\item \textbf{Tier 1（绿）.} $R_t<Q_{0.80}$ \;\;$\Rightarrow$ 65/35（评委/观众，更强调专业性）。
 \item \textbf{Tier 2（黄）.} $Q_{0.80}\le R_t<Q_{0.90}$ \;\;$\Rightarrow$ 启动 judge-save（bottom-two + save）。
 \item \textbf{Tier 3（红）.} $R_t\ge Q_{0.90}$ 或决赛周 \;\;$\Rightarrow$ 100\% 观众投票。
 \end{itemize}
-阈值采用分位数并可公开，强调规则透明与可执行。
+DAWS 被定义为“亲公正性安全网”：常规周强化专业性（$\alpha=0.65$），争议周启动更果断的评委拯救（$\beta=4.0$），仅在决赛周完全交由观众投票。阈值可公开，强调规则透明与可执行。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\linewidth]{figures/fig_daws_trigger.pdf}
@@ -486,11 +486,11 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \begin{equation}
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
 \end{equation}
-在黄档风险周，我们将评委视为纠偏把关者，设定 $\beta=2.0$，以体现对明显人气偏差的校正。
+在黄档风险周，我们将评委视为更果断的把关者，设定 $\beta=4.0$，以体现对明显人气偏差的强纠偏。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
-\caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率；示意曲线使用 $\beta=2.0$，分差越大则低分选手被淘汰概率越高）。}
+\caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率；示意曲线使用 $\beta=4.0$，分差越大则低分选手被淘汰概率越高）。}
 \end{figure}
 
 \keyoutput{DAWS 档位协议与校准的 judge-save 行为刻画。}
@@ -541,14 +541,7 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \label{fig:sigma-sensitivity}
 \end{figure}
 
-\subsection{DAWS 参数扫描}
-我们对 DAWS 的触发分位阈值、基准权重与 $\beta$ 进行网格扫描，并施加“活跃度约束”（触发率 20\%--35\%）以避免机制过度被动。约束优化结果选择 $P_{90}=0.80$、$P_{97}=0.90$、$\alpha_{\text{base}}=0.60$、$\beta=2.0$，对应触发率 20.3\%，在公正性与能动性之间取得均衡。
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.85\linewidth]{figures/fig_param_optimization.pdf}
-\caption{DAWS 参数空间扫描：热力图为综合效用分数（公正性 + 能动性 + 稳定性，取不同 $\beta$ 的最大值）。}
-\label{fig:param-optimization}
-\end{figure}
+% DAWS 参数扫描已移除，最终版采用固定的亲公正性配置。
 
 \section{预测校准}\label{app:auc}
 本附录提供 GBDT 前向链式验证的 AUC 结果，作为协变量有效性的鲁棒性检验。
