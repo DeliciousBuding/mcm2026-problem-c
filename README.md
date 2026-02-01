@@ -52,6 +52,9 @@ xelatex -interaction=nonstopmode -halt-on-error main_zh.tex
 - 任务追踪与产物：`docs/05_任务追踪清单.md`
 
 ## 变更记录（要点）
+- 已将数据移动到 `data/` 并修复 `src/pipeline.py` 中的数据路径解析；路径现在基于脚本位置，运行更稳健。  
+- 文档已重命名并归档旧稿到 `docs/archive/`。  
+- 完成 Block 0–3 的图注/附录/一致性工作；中英文论文已编译通过并保存到 `paper/`。
 
 如需我替你：运行完整 pipeline、生成特定图表或把输出推到远程，请告诉我下一步操作。
 
