@@ -1,5 +1,7 @@
 ﻿# MCM/ICM 2026 — Problem C (DWTS)
 
+[![CI](https://github.com/YOUR_USERNAME/ProblemC-2/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/ProblemC-2/actions/workflows/ci.yml)
+
 本仓库包含针对 COMAP 2026 Problem C（Dancing with the Stars）的数据处理、建模、可视化与论文产出流水线。
 
 ## 快速概览
@@ -12,13 +14,31 @@
 ## 项目结构（简要）
 ```
 .
+├─ .github/workflows/        # CI 配置（GitHub Actions）
 ├─ data/                     # 输入数据（2026_MCM_Problem_C_Data.csv）
 ├─ docs/                     # 项目说明与开发文档（编号归档）
 ├─ outputs/                  # 运行输出（summary_metrics 等）
 ├─ paper/                    # 论文源文件与编译输出（main.pdf / main_zh.pdf）
 │  └─ figures/               # 自动生成图表
 ├─ src/                      # 源代码（pipeline.py）
+├─ tests/                    # 测试文件（pytest）
 └─ README.md
+```
+
+## 持续集成（CI）
+
+项目配置了 **GitHub Actions** 进行自动化测试，每次推送到 `main` 或提 PR 时自动触发：
+
+| 检查项 | 工具 | 说明 |
+|--------|------|------|
+| 代码规范 | **Ruff** | 快速 Linter，检测语法错误、未定义变量等 |
+| 单元测试 | **pytest** | 运行 `tests/` 下所有测试用例 |
+
+**本地运行测试**（推送前建议先跑一遍）：
+```bash
+pip install pytest ruff
+ruff check .              # 代码检查
+python -m pytest -v       # 运行测试
 ```
 
 ## 环境与运行
