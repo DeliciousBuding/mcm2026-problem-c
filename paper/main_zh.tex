@@ -73,7 +73,7 @@
 \vspace{1ex}
 \begin{center}
 {\Large \textbf{DWTS 投票机制的审计与设计}}\\[0.5ex]
-\textit{我们将 DWTS 视为“审计 + 机制设计”问题：先反推可行粉丝票，再量化不确定性，并提出更平衡的规则。}
+\textit{我们将 DWTS 视为“审计 + 机制设计”问题：刻画可行粉丝票区域、量化不确定性，并提出更平衡的规则（兼顾能动性/一致性/稳定性）。}
 \end{center}
 
 \vspace{0.5ex}
@@ -99,7 +99,8 @@ P90 HDI 宽度（周层面） & \MetricHDIPctNinety \\
 最大 HDI 宽度（周层面） & \MetricMaxHDI \\
 Rank vs Percent 翻转率 & \MetricFlipRate\% \\
 DAWS 稳定性 & \MetricDAWSStability \\
-DAWS 公平性（Kendall $\tau$） & \MetricDAWSFairness \\
+DAWS 评委一致性 & \MetricDAWSIntegrity \\
+冲突指数（Kendall $\tau$） & \MetricDAWSFairness \\
 DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \bottomrule
 \end{tabular}
@@ -110,8 +111,8 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \begin{center}
 \begin{tikzpicture}[node distance=1.2cm,>=latex,scale=0.95]
 \tikzstyle{block}=[rectangle,draw=black!50,rounded corners,minimum height=0.8cm,minimum width=3.2cm,fill=gray!10]
-\node[block] (a) {多面体反演（LP/MILP）};
-\node[block,below of=a] (b) {最大熵 + 平滑后验};
+\node[block] (a) {可行区域审计};
+\node[block,below of=a] (b) {最大熵后验采样};
 \node[block,below of=b] (c) {机制审计 + DAWS 设计};
 \draw[->] (a) -- (b);
 \draw[->] (b) -- (c);
@@ -135,7 +136,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \node[red!70,anchor=west,scale=0.7] at (0.82,0.30) {elim};
 \end{tikzpicture}
 \end{center}
-\textbf{建议.} 采用随周变化的 DAWS 权重 $\alpha_t$，并公开 bottom-two 与 judge-save 判定标准。
+\textbf{建议.} 采用分段阈值化的 DAWS 权重 $\alpha_t$，并公开 bottom-two 与 judge-save 判定标准。
 \end{minipage}
 
 \clearpage
@@ -160,7 +161,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \begin{itemize}[leftmargin=2em]
 \item 规则整体与淘汰结果一致（$S^*\approx 0$），但不确定性在不同周差异明显。
 \item Rank 聚合是对粉丝支持度的有损压缩，造成显著翻转概率。
-\item DAWS 在公平、主权与稳定三指标上实现更好折中。
+\item DAWS 在能动性、评委一致性与稳定三指标上实现更好折中。
 \end{itemize}
 
 \textbf{主要发现.}
@@ -172,7 +173,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 
 \textbf{建议.}
 \begin{enumerate}[leftmargin=2em]
-\item 公布 DAWS 方案并基于不确定性指数 $U_t$ 调整 $\alpha_t$。
+\item 公布 DAWS 方案并基于不确定性指数 $U_t$ 的分段阈值规则调整 $\alpha_t$。
 \item 公开 judge-save 规则与投票记录，提高透明度。
 \item 用审计仪表盘提前预警高不确定周。
 \end{enumerate}
@@ -180,7 +181,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \noindent\begin{minipage}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_mechanism_radar.pdf}
-\captionof{figure}{机制权衡（雷达图）（轴为公平/主权/稳定，数值为周度加权平均）。}
+\captionof{figure}{机制权衡（雷达图）（轴为能动性/评委一致性/稳定，数值为周度加权平均）。}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.49\linewidth}
 \centering
@@ -195,10 +196,10 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 % Main Report
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{引言与路线图}
-\takeaway{我们将 DWTS 视为审计与机制设计问题：反推粉丝票、量化不确定性、提出更优规则。}
+\takeaway{我们将 DWTS 视为审计与机制设计问题：刻画可行粉丝票区域、量化不确定性、提出更优规则。}
 我们观测到每周评委分数与淘汰结果，但粉丝投票是潜变量。目标不是猜测唯一投票值，而是给出与规则一致的完整可行集合，并将不确定性传播到反事实机制评估与规则设计中。
 
-\textbf{贡献.} (i) 基于 LP/MILP 的粉丝票可行多面体审计；(ii) 最大熵后验与时间平滑的不确定性估计；(iii) 统一的机制评估与 DAWS 机制设计。
+\textbf{贡献.} (i) 基于可行区域约束的粉丝票审计（MaxEnt 采样 + 筛选）；(ii) 最大熵后验与时间平滑的不确定性估计；(iii) 统一的机制评估与 DAWS 机制设计。
 
 \subsection{任务-章节映射}
 \begin{table}[H]
@@ -207,10 +208,10 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \toprule
 任务 & 我们做了什么 & 主要产出 \\
 \midrule
-1 & 多面体反演与后验估计 & Fan HDI 区间 \\
+1 & 可行区域审计与后验估计 & Fan HDI 区间 \\
 2 & Percent 与 Rank 反事实对比 & 翻转率与赤字 \\
 3 & Judges vs Fans 双模型 & 影响差异 \\
-4 & 公平/主权/稳定指标 & 指标矩阵 \\
+4 & 能动性/评委一致性/稳定指标 & 指标矩阵 \\
 5 & DAWS 设计与 Pareto & 推荐机制 \\
 \bottomrule
 \end{tabular}
@@ -253,56 +254,57 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \begin{equation}
  R_i=r^J_i+r^F_i,\quad R_{E_t}\ge R_i\ \forall i\ne E_t.
 \end{equation}
-Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的软选择确定淘汰者。
+Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的软选择确定淘汰者（$\beta$ 为示意/校准参数）。
 
 \keyoutput{Percent、Rank 与 Judge-save 规则均可写入统一约束框架。}
 
 \section{假设与指标}
-\takeaway{使用公平、主权与稳定指标评价机制并定义民主赤字。}
+\takeaway{使用观众能动性、评委一致性与稳定指标评价机制，并辅以冲突指数与民主赤字。}
 假设：(i) 粉丝占比非负且有下限；(ii) 规则被遵守，除非 slack 提示张力；(iii) 周与周之间平滑。
 
 指标（高者更好，除非说明）：
 \begin{itemize}[leftmargin=2em]
-\item 公平性：评委与粉丝排序的 Kendall $\tau$。
-\item 观众主权：粉丝最低者被淘汰的概率。
+\item 冲突指数（Kendall $\tau$）：评委与粉丝排序一致性（值越高冲突越低）。
+\item 观众能动性：粉丝最低者被淘汰的概率。
 \item 评委一致性：评委最低者被淘汰的概率。
 \item 稳定性：同一机制在小扰动下的淘汰翻转率。
 \item 民主赤字：$D=\Pr(E^{(\text{rank})}_t\ne E^{(\text{percent})}_t)$。
 \end{itemize}
 \keyoutput{统一指标接口用于机制对比。}
 
-\section{模型A：多面体反演审计}
+\begin{takeawaybox}
+\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用基于 $U_t$ 分位的分段阈值权重，judge-save 曲线使用校准的 $\beta=1.8$ 作为示意。
+\end{takeawaybox}
+
+\section{模型A：可行区域审计}
 \subsection{观测与潜变量}
 \takeaway{可行粉丝票集合是 simplex 上的多面体，而非超矩形。}
 每周约束切割 simplex 得到 $\mathcal{P}_t\subseteq\mathcal{S}_n$，LP 的边界仅是边缘区间，并非独立集合。
 
-\subsection{Percent 规则 LP 审计}
+\subsection{Percent 规则可行区域审计}
 \begin{algorithm}[H]
-\caption{Percent 周度多面体审计（LP 约束与上下界，输出可行区间与松弛度）。}
+\caption{Percent 周度可行区域审计（提案+筛选，输出近似区间与摘要）。}
 \begin{algorithmic}[1]
 \Require $C_t, J_{i,t}, E_t, \alpha, \epsilon$
-\Ensure 边界 $(L_i,U_i)$，Slack $S_t^*$，采样接口
-\State 构造 simplex 与淘汰不等式
-\For{each $i\in C_t$}
-  \State $L_i\leftarrow \min_{\mathbf v\in\mathcal{P}_t} v_i$
-  \State $U_i\leftarrow \max_{\mathbf v\in\mathcal{P}_t} v_i$
-\EndFor
-\State 放松约束并求最小 slack $S_t^*$
-\State 输出边界与采样结果
+\Ensure 后验样本、接受率、近似边界 $(L_i,U_i)$
+\State 在 simplex 上采样 Dirichlet 提案（带下限 $\epsilon$）
+\State 按淘汰约束筛选提案（fast/strict）
+\State 用接受样本估计 $(L_i,U_i)$
+\State 输出样本与边界摘要
 \end{algorithmic}
 \end{algorithm}
 
-\subsection{Rank 规则 MILP 与有序 share}
+\subsection{Rank 规则可行序列（Monte Carlo）}
 \begin{algorithm}[H]
-\caption{Rank 可行序列到 share 采样（MILP 枚举可行序列后再采样）。}
+\caption{Rank 可行序列到 share 采样（Monte Carlo 生成候选序列后筛选）。}
 \begin{algorithmic}[1]
 \Require Rank 规则周数据
 \Ensure fan share 后验样本
-\State MILP 求可行粉丝排名排列 $\pi$
+\State Monte Carlo 生成候选粉丝排名排列 $\pi$
 \For{each $\pi$}
-  \State 构造 $\mathcal{P}_t(\pi)$ 并采样
+  \State Dirichlet 提案并筛选满足 $\pi$ 的样本
 \EndFor
-\State 汇总样本
+\State 汇总可行样本
 \end{algorithmic}
 \end{algorithm}
 
@@ -312,7 +314,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 
 \subsection{工程近似与严格校验}
 \takeaway{工程实现采用快速近似采样，并通过严格约束校验保证结论稳定。}
-理论模型采用 LP/MILP 形式化，但实际工程管线采用快速 Dirichlet 采样与简化可行性筛选以保证速度。为此，我们使用严格可行性（完整淘汰约束）对同一批候选样本进行再筛选，并比较后验摘要。
+理论模型可用 LP/MILP 形式化，但实际工程管线采用快速 Dirichlet 提案与约束筛选以保证速度。为此，我们使用严格可行性（完整淘汰约束）对同一批候选样本进行再筛选，并比较后验摘要。
 \begin{table}[H]
 \centering
 \begin{tabular}{@{}ll@{}}
@@ -322,8 +324,8 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 均值 fan share MAE & \MetricFastMAE \\
 Top-1 一致率（fast vs strict） & \MetricFastTopOne\% \\
 Top-2 一致率（fast vs strict） & \MetricFastTopTwo\% \\
-公平性变动（percent） & \MetricFastDeltaFair \\
-主权变动（percent） & \MetricFastDeltaAgency \\
+冲突指数变动（Kendall $\tau$） & \MetricFastDeltaFair \\
+能动性变动（percent） & \MetricFastDeltaAgency \\
 Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \bottomrule
 \end{tabular}
@@ -380,7 +382,7 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \caption{规则切换的探索性概率与不确定性区间；主分析采用第 28 季为切换点（虚线标记）。}
 \end{figure}
 
-\keyoutput{多面体边界、Slack、后验样本、规则切换概率。}
+\keyoutput{可行区域诊断、Slack、后验样本、规则切换概率。}
 
 \section{结果A：粉丝票估计与不确定性}
 \takeaway{评委与粉丝的冲突可被量化并可视化。}
@@ -431,7 +433,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \begin{subfigure}[t]{0.49\linewidth}
 \centering
 \includegraphics[width=\linewidth]{figures/fig_mechanism_compare.pdf}
-\caption{机制对比（数值）（三机制在公平/主权/稳定上的对比）。}
+\caption{机制对比（数值）（三机制在能动性/一致性/稳定上的对比）。}
 \end{subfigure}
 \end{figure}
 
@@ -467,20 +469,26 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \keyoutput{双模型对比与任务 3 的直接回答。}
 
 \section{模型D：机制设计（DAWS）}
-\takeaway{DAWS 以不确定性驱动权重调整，满足单调性与稳定性。}
+\takeaway{DAWS 采用分段阈值权重：常规周保持 50/50，高不确定周提高评委权重（透明可执行）。}
 \begin{equation}
-\alpha_t=\text{clip}\Big(\alpha_0+\gamma \frac{t}{T}-\eta U_t,\ \alpha_{\min},\alpha_{\max}\Big),\quad |\alpha_t-\alpha_{t-1}|\le\delta.
+\alpha_t=
+\begin{cases}
+\alpha_0,& U_t\le q_{90},\\
+\alpha_1,& q_{90}<U_t\le q_{97},\\
+\alpha_2,& U_t>q_{97},
+\end{cases}
 \end{equation}
+其中 $q_{90},q_{97}$ 为 $U_t$ 的分位阈值（仅在最不确定的周触发更高权重）。
 \begin{proposition}[单调性]
 评委与粉丝占比同时上升时，DAWS 得分不下降。
 \end{proposition}
 \begin{proposition}[稳定性界]
 \begin{equation}
-|c_{i,t}-c_{i,t-1}|\le \delta|j_{i,t}-v_{i,t}|+(1-\alpha_t)\|\mathbf v_t-\mathbf v_{t-1}\|+\alpha_t\|\mathbf j_t-\mathbf j_{t-1}\|.
+|c_{i,t}-c_{i,t-1}|\le |\alpha_t-\alpha_{t-1}||j_{i,t}-v_{i,t}|+(1-\alpha_t)\|\mathbf v_t-\mathbf v_{t-1}\|+\alpha_t\|\mathbf j_t-\mathbf j_{t-1}\|.
 \end{equation}
 \end{proposition}
 
-\subsection{Judge-save 参数学习}
+\subsection{Judge-save 参数设定}
 \begin{equation}
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
 \end{equation}
@@ -490,7 +498,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \caption{Judge-save 决策曲线（横轴评委分差，纵轴淘汰概率；示意曲线使用 $\beta=1.8$，分差越大则低分选手被淘汰概率越高）。}
 \end{figure}
 
-\keyoutput{DAWS 方案、性质与 judge-save 行为刻画。}
+\keyoutput{DAWS 方案、性质与校准的 judge-save 行为刻画。}
 
 \section{敏感性与验证}
 \takeaway{关键结论对 $\sigma$、$\epsilon$ 与规则切换先验具有稳健性。}
@@ -512,10 +520,10 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 
 \section{结论与建议}
 \takeaway{审计先行揭示关键不确定性，DAWS 提供稳健折中。}
-我们完成全赛季粉丝票审计，量化 Rank 机制的民主赤字，并提出 DAWS 方案以提升公平、主权与稳定。
+我们完成全赛季粉丝票审计，量化 Rank 机制的民主赤字，并提出 DAWS 方案以提升能动性、评委一致性与稳定。
 \begin{itemize}[leftmargin=2em]
 \item \textbf{可读结论：} 不确定性集中在少数周，其余周可识别性较高。
-\item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 在稳定性上明显更优。
+\item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 在稳定性上更优且不牺牲能动性/一致性。
 \item \textbf{落地建议：} 公布 DAWS 权重计划与 judge-save 规则以提升透明度。
 \end{itemize}
 

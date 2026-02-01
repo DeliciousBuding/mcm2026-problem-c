@@ -72,7 +72,7 @@
 \vspace{1ex}
 \begin{center}
 {\Large \textbf{Auditing and Designing the DWTS Voting Mechanism}}\\[0.5ex]
-\textit{We treat DWTS as an audit-and-design problem: invert feasible fan votes, quantify uncertainty, and redesign rules for fairness, agency, and stability.}
+\textit{We treat DWTS as an audit-and-design problem: characterize feasible fan votes, quantify uncertainty, and redesign rules for agency, integrity, and stability.}
 \end{center}
 
 \vspace{0.5ex}
@@ -98,7 +98,8 @@ Median HDI width (week-level) & \MetricMedianHDI \\
 P90 HDI width (week-level) & \MetricHDIPctNinety \\
 Rank vs percent flip rate & \MetricFlipRate\% \\
 DAWS stability & \MetricDAWSStability \\
-DAWS fairness (Kendall $\tau$) & \MetricDAWSFairness \\
+DAWS judge integrity & \MetricDAWSIntegrity \\
+Conflict index (Kendall $\tau$) & \MetricDAWSFairness \\
 DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \bottomrule
 \end{tabular}
@@ -109,8 +110,8 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \begin{center}
 \begin{tikzpicture}[node distance=1.2cm,>=latex,scale=0.95]
 \tikzstyle{block}=[rectangle,draw=black!50,rounded corners,minimum height=0.8cm,minimum width=3.2cm,fill=gray!10]
-\node[block] (a) {Polytope Inversion (LP/MILP)};
-\node[block,below of=a] (b) {MaxEnt + Smooth Posterior};
+\node[block] (a) {Feasible-region audit};
+\node[block,below of=a] (b) {MaxEnt posterior sampling};
 \node[block,below of=b] (c) {Mechanism Audit + DAWS Design};
 \draw[->] (a) -- (b);
 \draw[->] (b) -- (c);
@@ -134,7 +135,7 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \node[red!70,anchor=west,scale=0.7] at (0.82,0.30) {elim};
 \end{tikzpicture}
 \end{center}
-\textbf{Recommendation.} Adopt DAWS with time-varying $\alpha_t$ and publish bottom-two plus judge-save criteria.
+\textbf{Recommendation.} Adopt DAWS with thresholded $\alpha_t$ tiers and publish bottom-two plus judge-save criteria.
 \end{minipage}
 
 \clearpage
@@ -159,7 +160,7 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 \begin{itemize}[leftmargin=2em]
 \item Rules are consistent with all eliminations (slack $S^*\approx 0$), but uncertainty is highly uneven across weeks.
 \item Rank aggregation is a lossy compression of fan support and increases flip probability relative to percent aggregation.
-\item DAWS improves fairness, agency, and stability simultaneously when weights are adapted to uncertainty.
+\item DAWS improves agency, integrity, and stability simultaneously when weights are thresholded by uncertainty.
 \end{itemize}
 
 \textbf{Key Findings.}
@@ -171,7 +172,7 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 
 \textbf{Recommendations.}
 \begin{enumerate}[leftmargin=2em]
-\item Publish a DAWS schedule $\alpha_t$ and update it based on an uncertainty index $U_t$.
+\item Publish a DAWS schedule $\alpha_t$ with thresholded tiers based on an uncertainty index $U_t$.
 \item Make judge-save criteria explicit and record votes to improve transparency.
 \item Use an audit dashboard to flag weeks with high posterior uncertainty.
 \end{enumerate}
@@ -195,10 +196,10 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 % Main Report
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Introduction and Roadmap}
-\takeaway{We model DWTS as an audit-and-design problem: invert feasible fan votes, quantify uncertainty, and propose a rule with improved trade-offs.}
+\takeaway{We model DWTS as an audit-and-design problem: characterize feasible fan votes, quantify uncertainty, and propose a rule with improved trade-offs.}
 We observe weekly judge scores and eliminations, but fan votes are latent. Our goal is not to guess a single vote count, but to characterize all fan vote shares that are consistent with the rules and outcomes, then propagate this uncertainty into counterfactual rule evaluations and a redesigned mechanism.
 
-\textbf{Contributions.} (i) Polytope inversion audit of fan shares with slack diagnostics; (ii) MaxEnt posterior with temporal smoothness and uncertainty quantification; (iii) unified counterfactual mechanism evaluation plus a DAWS design with theoretical properties.
+\textbf{Contributions.} (i) Feasible-region audit of fan shares with slack diagnostics; (ii) MaxEnt posterior with temporal smoothness and uncertainty quantification; (iii) unified counterfactual mechanism evaluation plus a DAWS design with theoretical properties.
 
 \subsection{Task-to-Section Mapping}
 \begin{table}[H]
@@ -207,16 +208,16 @@ We observe weekly judge scores and eliminations, but fan votes are latent. Our g
 \toprule
 Task & What we do & Main output \\\\
 \midrule
-1 & Polytope inversion and posterior fan shares & Fan HDI bands \\\\
+1 & Feasible-region audit and posterior fan shares & Fan HDI bands \\\\
 2 & Percent vs rank counterfactuals and rule switch & Deficit and flips \\\\
 3 & Judges vs fans dual models & Effect differences \\\\
-4 & Fairness/agency/stability metrics & Metric matrix \\\\
+4 & Agency/integrity/stability metrics & Metric matrix \\\\
 5 & DAWS design and Pareto analysis & Recommended rule \\\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\keyoutput{A full pipeline that maps observed eliminations to a feasible fan-vote polytope, posterior samples, and mechanism metrics.}
+\keyoutput{A full pipeline that maps observed eliminations to a feasible fan-vote region, posterior samples, and mechanism metrics.}
 
 \section{Data and Rules}
 \takeaway{We normalize across weeks using shares and encode both percent and rank-based rules, including judge-save.}
@@ -253,17 +254,17 @@ Combined rank and elimination:
 \begin{equation}
  R_i=r^J_i+r^F_i,\quad R_{E_t}\ge R_i\ \forall i\ne E_t.
 \end{equation}
-For judge-save seasons, the bottom two are selected by $R_i$ and judges choose with a soft preference parameter $\beta$.
+For judge-save seasons, the bottom two are selected by $R_i$ and judges choose with a soft preference parameter $\beta$ (calibrated/illustrative).
 
-\keyoutput{Formal rules encoded for LP/MILP feasibility, including rank and judge-save logic.}
+\keyoutput{Formal rules encoded for feasibility checks (LP/MILP optional), including rank and judge-save logic.}
 
 \section{Assumptions and Metrics}
-\takeaway{We quantify mechanism quality using fairness, viewer agency, and stability metrics, alongside a democratic deficit indicator.}
+\takeaway{We quantify mechanism quality using viewer agency, judge integrity, and stability metrics, alongside a conflict index (Kendall $\tau$) and a democratic deficit indicator.}
 We assume: (i) fan shares are nonnegative with floor $\epsilon$; (ii) rule statements are followed unless slack indicates tension; (iii) week-to-week fan shares are smooth.
 
 Metrics (higher is better unless noted):
 \begin{itemize}[leftmargin=2em]
-\item Fairness: Kendall $\tau$ alignment between judge and fan rankings.
+\item Conflict index (Kendall $\tau$): alignment between judge and fan rankings (higher = less conflict).
 \item Viewer agency: probability that the fan-lowest is eliminated.
 \item Judge integrity: probability that the judge-lowest is eliminated.
 \item Stability: elimination flip rate under small perturbations within the same mechanism.
@@ -271,39 +272,39 @@ Metrics (higher is better unless noted):
 \end{itemize}
 \keyoutput{A shared metric interface allows direct comparison across mechanisms.}
 
-\section{Model A: Polytope Inversion Audit}
+\begin{takeawaybox}
+\textbf{Methodology Alignment Box.} Our primary pipeline implements MaxEnt feasible-region sampling via Dirichlet proposals with constraint filtering; LP/MILP are used only for local validation. Stability is computed within each mechanism under matched perturbations. DAWS uses public thresholded tiers (based on $U_t$ quantiles), and the judge-save curve uses a calibrated $\beta=1.8$ for illustration.
+\end{takeawaybox}
+
+\section{Model A: Feasible-Region Audit}
 \subsection{Observables and Latents}
 \takeaway{The feasible fan-vote set is a polytope on the simplex, not a hyperrectangle.}
-For each week, constraints from the rule define a polytope $\mathcal{P}_t\subseteq \mathcal{S}_n$. LP-based bounds $(L_i,U_i)$ are marginal ranges, while the true feasible set is the intersection of all inequalities.
+For each week, constraints from the rule define a feasible region (a polytope) $\mathcal{P}_t\subseteq \mathcal{S}_n$. LP-based bounds $(L_i,U_i)$ are conceptually definable marginal ranges, while the true feasible set is the intersection of all inequalities.
 
-\subsection{Percent Rule LP Audit}
+\subsection{Percent Rule Feasible-Region Audit}
 \begin{algorithm}[H]
-\caption{Percent Week Polytope Audit}
+\caption{Percent Week Feasible-Region Audit (proposal + filtering)}
 \begin{algorithmic}[1]
 \Require $C_t, J_{i,t}, E_t, \alpha, \epsilon$
-\Ensure Bounds $(L_i,U_i)$, slack $S_t^*$, sampling interface
-\State Construct constraints from simplex and elimination inequalities
-\For{each $i\in C_t$}
-  \State $L_i\leftarrow \min_{\mathbf v\in\mathcal{P}_t} v_i$
-  \State $U_i\leftarrow \max_{\mathbf v\in\mathcal{P}_t} v_i$
-\EndFor
-\State Compute slack $S_t^*$ by relaxing constraints with $s_i\ge 0$
-\State Output $\mathcal{P}_t$ and bound summaries
+\Ensure Posterior samples, accept rate, approximate bounds $(L_i,U_i)$
+\State Draw Dirichlet proposals on the simplex with floor $\epsilon$
+\State Filter proposals by elimination constraints (fast/strict)
+\State Estimate $(L_i,U_i)$ from accepted samples
+\State Output samples and bound summaries
 \end{algorithmic}
 \end{algorithm}
 
-\subsection{Rank Rule MILP and Ordered Shares}
+\subsection{Rank Rule Feasible Orders (Monte Carlo)}
 \begin{algorithm}[H]
-\caption{Rank Feasible Orders to Feasible Shares}
+\caption{Rank Feasible Orders to Feasible Shares (Monte Carlo)}
 \begin{algorithmic}[1]
 \Require Rank rule data for week $t$
 \Ensure Fan share posterior samples
-\State Solve MILP for feasible fan-rank permutations $\pi$
+\State Generate candidate fan-rank permutations $\pi$ by Monte Carlo
 \For{each feasible $\pi$}
-  \State Build ordered-share polytope $\mathcal{P}_t(\pi)$
-  \State Sample by Hit-and-Run to obtain $\mathbf v$ samples
+  \State Draw Dirichlet proposals and retain those consistent with $\pi$
 \EndFor
-\State Aggregate samples across $\pi$
+\State Aggregate samples across feasible $\pi$
 \end{algorithmic}
 \end{algorithm}
 
@@ -313,7 +314,7 @@ When a contestant is immune, we remove them from the elimination inequality set.
 
 \subsection{Engineering Approximation and Validation}
 \takeaway{We use a fast approximate sampler in code and validate it against strict constraints to preserve headline conclusions.}
-Our theoretical framework is LP/MILP-based; however, the production pipeline uses a fast Dirichlet sampler with simplified feasibility checks for speed. We therefore validate the approximation by re-filtering the same proposals with strict feasibility (full elimination constraints) and comparing posterior summaries.
+Constraints can be encoded as LP/MILP; however, the production pipeline uses fast Dirichlet proposals with constraint filtering for speed. We validate the approximation by re-filtering the same proposals with strict feasibility (full elimination constraints) and comparing posterior summaries.
 \begin{table}[H]
 \centering
 \begin{tabular}{@{}ll@{}}
@@ -323,7 +324,7 @@ Validation metric & Value \\
 MAE of mean fan share & \MetricFastMAE \\
 Top-1 agreement (fast vs strict) & \MetricFastTopOne\% \\
 Top-2 agreement (fast vs strict) & \MetricFastTopTwo\% \\
-Fairness shift (percent) & \MetricFastDeltaFair \\
+Conflict index shift (Kendall $\tau$) & \MetricFastDeltaFair \\
 Agency shift (percent) & \MetricFastDeltaAgency \\
 Flip-rate shift (percent vs rank) & \MetricFastDeltaFlip\% \\
 \bottomrule
@@ -387,7 +388,7 @@ For each season $s$, we compute evidence proxies $\mathcal E_s^{(\text{percent})
 \caption{Exploratory rule-switch probability with uncertainty; Season 28 is adopted in the main analysis.}
 \end{figure}
 
-\keyoutput{Polytope bounds, slack $S_t^*$, posterior samples, and rule-switch probabilities.}
+\keyoutput{Feasible-region diagnostics, slack $S_t^*$, posterior samples, and rule-switch probabilities.}
 
 \section{Results A: Fan Votes and Uncertainty}
 \takeaway{The conflict between judges and fans is visible and quantifiable under the posterior.}
@@ -426,7 +427,7 @@ Define a generic mechanism $M$ and elimination operator:
 \begin{equation}
 E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \end{equation}
-We compute fairness, agency, stability, and deficit for percent, rank, rank+save, and DAWS.
+We compute a conflict index (Kendall $\tau$), viewer agency, judge integrity, stability, and deficit for percent, rank, rank+save, and DAWS.
 
 % 机制差异的结果迁移图（占位保留）
 \begin{figure}[H]
@@ -484,36 +485,41 @@ We train a gradient-boosted decision tree (GBDT) classifier to predict eliminati
 \keyoutput{Dual models and a direct answer to Task 3: effects are not identical.}
 
 \section{Model D: Mechanism Design (DAWS)}
-\takeaway{DAWS adapts judge weight to uncertainty and satisfies monotonicity and stability.}
+\takeaway{DAWS uses thresholded weights tied to uncertainty, making the rule transparent and executable.}
 We define
 \begin{equation}
-\alpha_t=\text{clip}\Big(\alpha_0+\gamma \frac{t}{T}-\eta U_t,\ \alpha_{\min},\alpha_{\max}\Big),\quad |\alpha_t-\alpha_{t-1}|\le\delta.
+\alpha_t=
+\begin{cases}
+\alpha_0,& U_t\le q_{90},\\
+\alpha_1,& q_{90}<U_t\le q_{97},\\
+\alpha_2,& U_t>q_{97},
+\end{cases}
 \end{equation}
+where $q_{90},q_{97}$ are quantiles of $U_t$ and $(\alpha_0,\alpha_1,\alpha_2)$ are fixed public tiers.
 \begin{proposition}[Monotonicity]
 If both judge share and fan share of a contestant increase, their DAWS score does not decrease.
 \end{proposition}
 \begin{proposition}[Stability bound]
-With $|\alpha_t-\alpha_{t-1}|\le\delta$, the score change satisfies
+With tiered $\alpha_t$, the score change satisfies
 \begin{equation}
-|c_{i,t}-c_{i,t-1}|\le \delta|j_{i,t}-v_{i,t}|+(1-\alpha_t)\|\mathbf v_t-\mathbf v_{t-1}\|+\alpha_t\|\mathbf j_t-\mathbf j_{t-1}\|.
+|c_{i,t}-c_{i,t-1}|\le |\alpha_t-\alpha_{t-1}||j_{i,t}-v_{i,t}|+(1-\alpha_t)\|\mathbf v_t-\mathbf v_{t-1}\|+\alpha_t\|\mathbf j_t-\mathbf j_{t-1}\|.
 \end{equation}
 \end{proposition}
 
-\subsection{Judge-save parameter learning}
-We estimate $\beta$ in
+\subsection{Judge-save parameter calibration}
+We use a calibrated $\beta$ in
 \begin{equation}
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
 \end{equation}
-and report $\hat\beta$ with confidence intervals.
 
 % Judge-save 决策曲线
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
-\caption{Judges prefer higher score within the bottom two; $\hat\beta$ quantifies sharpness.}
+\caption{Judges prefer higher score within the bottom two; the curve uses calibrated $\beta=1.8$ to illustrate sharpness.}
 \end{figure}
 
-\keyoutput{DAWS schedule, properties, and learned judge-save behavior.}
+\keyoutput{DAWS schedule, properties, and calibrated judge-save behavior.}
 
 \section{Sensitivity and Validation}
 \takeaway{Key claims are stable to $\sigma$, $\epsilon$, and rule-switch priors.}
@@ -538,10 +544,10 @@ We benchmark sampling scale with a multi-process setup and record runtime, error
 
 \section{Conclusions and Recommendations}
 \takeaway{Audit-first modeling reveals uncertainty that matters; DAWS offers a robust compromise.}
-We provide a complete audit of feasible fan votes, show that rank rules create measurable democratic deficit, and propose DAWS to balance fairness, agency, and stability. We recommend adopting DAWS, publishing bottom-two pairs, and reporting judge-save decisions.
+We provide a complete audit of feasible fan votes, show that rank rules create measurable democratic deficit, and propose DAWS to balance agency, integrity, and stability. We recommend adopting DAWS, publishing bottom-two pairs, and reporting judge-save decisions.
 \begin{itemize}[leftmargin=2em]
 \item \textbf{Decision-ready summary:} Uncertainty is concentrated in a small set of weeks; most weeks are identifiable.
-\item \textbf{Mechanism impact:} Rank aggregation increases flips; DAWS improves stability without sacrificing fairness.
+\item \textbf{Mechanism impact:} Rank aggregation increases flips; DAWS improves stability without sacrificing agency or integrity.
 \item \textbf{Actionability:} Publish a DAWS schedule and judge-save criteria to improve transparency.
 \end{itemize}
 

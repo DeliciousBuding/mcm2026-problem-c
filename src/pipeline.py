@@ -53,6 +53,13 @@ FAST_STRICT_PROPS = int(os.getenv("MCM_STRICT_PROPS", "2000"))  # Strict 校验�
 FAST_STRICT_MAX_SAMPLES = int(os.getenv("MCM_STRICT_MAX_SAMPLES", "600"))  # Strict 校验最大样本数
 RULE_SWITCH_BOOT = int(os.getenv("MCM_RULE_BOOT", "200"))  # 规则切换置信带 bootstrap 次数
 
+# DAWS 分段阈值与权重（强调可公开、可执行）
+DAWS_ALPHA_BASE = 0.50
+DAWS_ALPHA_DISPUTE = 0.60
+DAWS_ALPHA_EXTREME = 0.70
+DAWS_U_P90 = 0.90
+DAWS_U_P97 = 0.97
+
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
 COLOR_PRIMARY_DARK = "#0B3C5D"
@@ -233,12 +240,18 @@ def lp_bounds_and_slack(week_df, alpha, epsilon, compute_bounds):
     return {}, 0.001
 
 
-def compute_alpha_t(week: int, total_weeks: int, mean_width: float,
-                    alpha0: float, gamma: float, eta: float,
-                    alpha_min: float, alpha_max: float) -> float:
-    """根据不确定性调整 DAWS 权重。"""
-    base_alpha = alpha0 + gamma * (week / max(1, total_weeks)) - eta * mean_width
-    return float(np.clip(base_alpha, alpha_min, alpha_max))
+def compute_alpha_t(mean_width: float,
+                    u_p90: float,
+                    u_p97: float,
+                    alpha_base: float,
+                    alpha_dispute: float,
+                    alpha_extreme: float) -> float:
+    """根据不确定性分段调整 DAWS 权重（可公开阈值规则）。"""
+    if mean_width >= u_p97:
+        return float(alpha_extreme)
+    if mean_width >= u_p90:
+        return float(alpha_dispute)
+    return float(alpha_base)
 
 
 def apply_percent_mask(
@@ -455,7 +468,7 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
     axes[1, 0].set_ylabel("Stability")
 
     axes[1, 1].plot(x, df["fairness_daws"], marker="o", color=COLOR_GRAY)
-    axes[1, 1].set_title("Theory Fit (Kendall tau) vs Scale")
+    axes[1, 1].set_title("Conflict index (Kendall tau) vs Scale")
     axes[1, 1].set_xlabel("N_PROPOSALS")
     axes[1, 1].set_ylabel("Tau")
 
@@ -715,6 +728,16 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     week_metrics_df = pd.DataFrame(week_metrics)
     log(f"Posterior rows: {len(posterior_df)}, Week metrics: {len(week_metrics_df)}")
 
+    u_series = week_metrics_df["mean_hdi_width"].dropna()
+    if u_series.empty:
+        u_p90 = 0.0
+        u_p97 = 0.0
+    else:
+        u_p90 = float(u_series.quantile(DAWS_U_P90))
+        u_p97 = float(u_series.quantile(DAWS_U_P97))
+        if u_p97 < u_p90:
+            u_p97 = u_p90
+
     # HDI 分布图
     hdi_series = week_metrics_df["mean_hdi_width"].dropna()
     q1 = float(hdi_series.quantile(0.25)) if not hdi_series.empty else float("nan")
@@ -866,9 +889,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     flip_sum = 0.0
     flip_count = 0
 
-    # DAWS参数
-    alpha0, gamma, eta = 0.55, 0.15, 0.8
-    alpha_min, alpha_max, delta = 0.35, 0.75, 0.08
+    # DAWS参数（分段阈值权重）
+    alpha_base = DAWS_ALPHA_BASE
+    alpha_dispute = DAWS_ALPHA_DISPUTE
+    alpha_extreme = DAWS_ALPHA_EXTREME
 
     for (season, week), wdf in season_week_groups:
         active_df = wdf[wdf["active"]].copy()
@@ -886,8 +910,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         mean_width = week_metrics_df[(week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)]["mean_hdi_width"].mean()
         if np.isnan(mean_width):
             mean_width = 0.0
-        T = active_df["week"].max()
-        alpha_t = compute_alpha_t(week, T, mean_width, alpha0, gamma, eta, alpha_min, alpha_max)
+        alpha_t = compute_alpha_t(mean_width, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
 
         eval_res = evaluate_mechanisms(samples, active_df, alpha_t, EPSILON, RNG)
         if not eval_res:
@@ -1004,8 +1027,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             mean_width = week_metrics_df[(week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)]["mean_hdi_width"].mean()
             if np.isnan(mean_width):
                 mean_width = 0.0
-            T = active_df["week"].max()
-            alpha_t = compute_alpha_t(week, T, mean_width, alpha0, gamma, eta, alpha_min, alpha_max)
+            alpha_t = compute_alpha_t(mean_width, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
 
             res_fast = evaluate_mechanisms(fast_samples, active_df, alpha_t, EPSILON, rng)
             res_strict = evaluate_mechanisms(strict_samples, active_df, alpha_t, EPSILON, rng)
@@ -1283,7 +1305,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # Mechanism radar
     def radar_plot(stats_dict: Dict[str, Dict[str, float]], labels: List[str], fname: str) -> None:
-        categories = ["fairness", "agency", "stability"]
+        categories = ["agency", "judge_integrity", "stability"]
+        tick_labels = ["Agency", "Integrity", "Stability"]
         angles = np.linspace(0, 2 * math.pi, len(categories), endpoint=False).tolist()
         angles += angles[:1]
         fig = plt.figure(figsize=(4.8, 4.2))
@@ -1293,7 +1316,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             values += values[:1]
             ax.plot(angles, values, label=label)
             ax.fill(angles, values, alpha=0.10)
-        ax.set_thetagrids(np.degrees(angles[:-1]), categories)
+        ax.set_thetagrids(np.degrees(angles[:-1]), tick_labels)
         ax.set_title("Mechanism trade-offs")
         ax.legend(loc="upper right", bbox_to_anchor=(1.15, 1.05))
         fig.savefig(FIG_DIR / fname)
@@ -1306,10 +1329,10 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     )
 
     # Mechanism compare (bar)
-    labels = ["Fairness", "Agency", "Stability"]
-    percent_vals = [stats_percent["fairness"], stats_percent["agency"], stats_percent["stability"]]
-    rank_vals = [stats_rank["fairness"], stats_rank["agency"], stats_rank["stability"]]
-    daws_vals = [stats_daws["fairness"], stats_daws["agency"], stats_daws["stability"]]
+    labels = ["Agency", "Integrity", "Stability"]
+    percent_vals = [stats_percent["agency"], stats_percent["judge_integrity"], stats_percent["stability"]]
+    rank_vals = [stats_rank["agency"], stats_rank["judge_integrity"], stats_rank["stability"]]
+    daws_vals = [stats_daws["agency"], stats_daws["judge_integrity"], stats_daws["stability"]]
     x = np.arange(len(labels))
     width = 0.24
     plt.figure(figsize=(6.2, 3.6))
@@ -1597,8 +1620,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 ]["mean_hdi_width"].mean()
                 if np.isnan(mean_width):
                     mean_width = 0.0
-                total_weeks = int(long_df[long_df["season"] == season]["week"].max())
-                alpha_t = compute_alpha_t(week, total_weeks, mean_width, alpha0, gamma, eta, alpha_min, alpha_max)
+                alpha_t = compute_alpha_t(mean_width, u_p90, u_p97, alpha_base, alpha_dispute, alpha_extreme)
                 combined = alpha_t * j_share + (1 - alpha_t) * v_share
                 elim_pred = int(np.argmin(combined))
             if elim_pred not in elim_idx:
@@ -1651,6 +1673,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         "flip_rate": flip_rate,
         "daws_improve": daws_improve,
         "stability_daws": stats_daws["stability"],
+        "integrity_daws": stats_daws["judge_integrity"],
         "fairness_daws": stats_daws["fairness"],
     }
     if fast_strict_summary:
@@ -1680,6 +1703,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             f"\\newcommand{{\\MetricFlipRate}}{{{summary['flip_rate']*100:.1f}}}",
             f"\\newcommand{{\\MetricDAWSImprove}}{{{summary['daws_improve']:.1f}}}",
             f"\\newcommand{{\\MetricDAWSStability}}{{{summary['stability_daws']:.3f}}}",
+            f"\\newcommand{{\\MetricDAWSIntegrity}}{{{summary['integrity_daws']:.3f}}}",
             f"\\newcommand{{\\MetricDAWSFairness}}{{{summary['fairness_daws']:.3f}}}",
             f"\\newcommand{{\\MetricFastMAE}}{{{summary.get('fast_strict_mae', float('nan')):.4f}}}",
             f"\\newcommand{{\\MetricFastTopOne}}{{{summary.get('fast_strict_top1', float('nan'))*100:.1f}}}",
