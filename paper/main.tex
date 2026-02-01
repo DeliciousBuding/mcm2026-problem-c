@@ -181,8 +181,9 @@ DAWS improvement in stability & +\MetricDAWSImprove\% \\
 % Main Report
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Introduction and Roadmap}
-\takeaway{We model DWTS as an audit-and-design problem: characterize feasible fan votes, quantify uncertainty, and propose a rule with improved trade-offs.}
-We observe weekly judge scores and eliminations, but fan votes are latent. Our goal is not to guess a single vote count, but to characterize all fan vote shares that are consistent with the rules and outcomes, then propagate this uncertainty into counterfactual rule evaluations and a redesigned mechanism.
+\takeaway{We model DWTS as an audit-and-design problem: audit feasible votes, stress-test uncertainty, deploy a risk-control protocol, and monitor via a producer dashboard.}
+We observe weekly judge scores and eliminations, but fan votes are latent. Our goal is not to guess a single vote count, but to characterize all fan vote shares consistent with the rules and outcomes, then propagate uncertainty into counterfactual evaluations and a redesigned mechanism.
+Our workflow is intentionally operational: audit the existing system (feasible-region analysis), stress-test with synthetic validation, deploy DAWS as a tiered risk-control protocol, and expose decisions through a dashboard that producers can execute and communicate on-air.
 
 \textbf{Contributions.} (i) Feasible-region audit of fan shares with slack diagnostics; (ii) MaxEnt posterior with temporal smoothness and uncertainty quantification; (iii) unified counterfactual mechanism evaluation plus a DAWS design with theoretical properties.
 
