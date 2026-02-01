@@ -181,8 +181,9 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 % Main Report
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{引言与路线图}
-\takeaway{我们将 DWTS 视为审计与机制设计问题：刻画可行粉丝票区域、量化不确定性、提出更优规则。}
+\takeaway{我们将 DWTS 视为“审计—压力测试—风控—可视化监控”的完整闭环。}
 我们观测到每周评委分数与淘汰结果，但粉丝投票是潜变量。目标不是猜测唯一投票值，而是给出与规则一致的完整可行集合，并将不确定性传播到反事实机制评估与规则设计中。
+我们的流程强调可执行性：先审计可行粉丝票集合，再用合成数据压力测试，随后部署 DAWS 三档风控协议，并通过仪表盘输出可执行决策口径。
 
 \textbf{贡献.} (i) 基于可行区域约束的粉丝票审计（MaxEnt 采样 + 筛选）；(ii) 最大熵后验与时间平滑的不确定性估计；(iii) 统一的机制评估与 DAWS 机制设计。
 
@@ -447,11 +448,10 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \caption{标注离对角线最远的特征以突出差异（远离对角线=评委/粉丝效应不一致）。}
 \end{figure}
 
-\subsection{预测补充：GBDT}
-\takeaway{预测模型仅作为协变量有效性的鲁棒性检验。}
-GBDT 分季 AUC 表现稳定，详见附录~\ref{app:auc}。
+\paragraph{预测补充（附录）}
+GBDT 仅作为协变量有效性的鲁棒性检验，细节置于附录~\ref{app:auc}。
 
-\keyoutput{双模型对比与任务 3 的直接回答。}
+\keyoutput{双模型回答任务 3；预测细节转入附录。}
 
 \section{模型D：机制设计（DAWS）}
 \takeaway{DAWS 是三档风控协议：红/黄/绿，对应清晰可执行的动作。}
@@ -475,6 +475,12 @@ GBDT 分季 AUC 表现稳定，详见附录~\ref{app:auc}。
 \caption{制片人仪表盘概念图：当前档位、审计窗（HDI 条）与动作建议。}
 \label{fig:dashboard-concept}
 \end{figure}
+
+评委的保存决策可以用效用框架解释：在 bottom-two 中权衡技能、收视与舆情风险。一个最简表述为
+\begin{equation}
+U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Backlash}_A,
+\end{equation}
+这支持用 logit 概率刻画，但不假设绝对理性。
 
 \subsection{Judge-save 参数设定}
 \begin{equation}
