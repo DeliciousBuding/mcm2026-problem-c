@@ -358,12 +358,7 @@ We define a truncated posterior with temporal smoothness:
 \begin{equation}
  p(\mathbf v_{1:T}|\text{rules,data})\propto \Big[\prod_t \mathbf{1}(\mathbf v_t\in\mathcal{P}_t)\Big]\cdot\prod_{t=2}^T \exp\Big(-\frac{\|\mathbf v_t-\mathbf v_{t-1}\|^2}{2\sigma^2}\Big).
 \end{equation}
-% 平滑参数敏感性
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/fig_sigma_sensitivity.pdf}
-\caption{Key conclusions are stable across a range of $\sigma$ values.}
-\end{figure}
+Key conclusions are stable across a range of $\sigma$ values; see Appendix~\ref{app:sensitivity} for details.
 
 \subsection{Rule-Switch Inference}
 \takeaway{We adopt Season 28 as the switch per the problem statement and provide an exploratory change-point check.}
@@ -484,13 +479,7 @@ We fit mixed-effects models on logit shares:
 
 \subsection{Predictive Add-on: GBDT}
 \takeaway{We include a predictive model as a robustness check, not as the main driver analysis.}
-We train a gradient-boosted decision tree (GBDT) classifier to predict elimination using forward-chaining validation and report AUC as a sanity check on covariate relevance.
-% 预测性能曲线
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.90\linewidth]{figures/fig_auc_forward.pdf}
-\caption{Predictive performance is stable and supports the selected covariates.}
-\end{figure}
+We train a gradient-boosted decision tree (GBDT) classifier to predict elimination using forward-chaining validation and report AUC as a sanity check on covariate relevance. Predictive performance is stable and supports the selected covariates; see Appendix~\ref{app:auc} for the calibration curve.
 
 \keyoutput{Dual models and a direct answer to Task 3: effects are not identical.}
 
@@ -568,6 +557,26 @@ We provide a complete audit of feasible fan votes, show that rank rules create m
 \item \textbf{Mechanism impact:} Rank aggregation increases flips; DAWS increases agency at a modest stability cost (see Fig.~\ref{fig:counterfactual-risk} and Fig.~\ref{fig:daws-trigger}).
 \item \textbf{Actionability:} Publish a DAWS schedule and judge-save criteria to improve transparency.
 \end{itemize}
+
+\clearpage
+\appendix
+\section{Sensitivity Analysis}\label{app:sensitivity}
+We present the smoothness parameter sensitivity analysis here. Key conclusions remain stable across a range of $\sigma$ values.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_sigma_sensitivity.pdf}
+\caption{Sensitivity of key metrics to smoothness parameter $\sigma$. Conclusions are robust across the tested range.}
+\label{fig:sigma-sensitivity}
+\end{figure}
+
+\section{Predictive Calibration}\label{app:auc}
+We include forward-chaining AUC results as a robustness check on covariate relevance.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_auc_forward.pdf}
+\caption{Forward-chaining AUC curve. Predictive performance is stable and supports the selected covariates.}
+\label{fig:auc-forward}
+\end{figure}
 
 \clearpage
 \section*{References}

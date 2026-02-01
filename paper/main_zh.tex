@@ -355,11 +355,7 @@ Flip-rate 变动（percent vs rank） & \MetricFastDeltaFlip\% \\
 \begin{equation}
  p(\mathbf v_{1:T}|\text{rules,data})\propto \Big[\prod_t \mathbf{1}(\mathbf v_t\in\mathcal{P}_t)\Big]\cdot\prod_{t=2}^T \exp\Big(-\frac{\|\mathbf v_t-\mathbf v_{t-1}\|^2}{2\sigma^2}\Big).
 \end{equation}
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\linewidth]{figures/fig_sigma_sensitivity.pdf}
-\caption{结论对 $\sigma$ 较为稳健（横轴平滑参数，纵轴平均 HDI）。}
-\end{figure}
+结论对 $\sigma$ 较为稳健，详见附录~\ref{app:sensitivity}。
 
 \subsection{规则切换推断}
 \takeaway{按题目假设采用第 28 季为切换点，并提供探索性变点检验。}
@@ -468,11 +464,7 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 
 \subsection{预测补充：GBDT}
 \takeaway{预测模型仅作为协变量有效性的鲁棒性检验。}
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.90\linewidth]{figures/fig_auc_forward.pdf}
-\caption{分季 AUC 表现稳定（前向链式验证）。}
-\end{figure}
+GBDT 分季 AUC 表现稳定，详见附录~\ref{app:auc}。
 
 \keyoutput{双模型对比与任务 3 的直接回答。}
 
@@ -541,6 +533,26 @@ E_t^{(M)}=\arg\min_i \text{Score}_i^{(M)}.
 \item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 提升能动性但稳定性略有代价（见图~\ref{fig:counterfactual-risk} 与图~\ref{fig:daws-trigger}）。
 \item \textbf{落地建议：} 公布 DAWS 权重计划与 judge-save 规则以提升透明度。
 \end{itemize}
+
+\clearpage
+\appendix
+\section{敏感性分析}\label{app:sensitivity}
+本附录展示平滑参数 $\sigma$ 的敏感性分析。主要结论在测试范围内保持稳健。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_sigma_sensitivity.pdf}
+\caption{$\sigma$ 敏感性：结论对平滑参数较为稳健（横轴为 $\sigma$，纵轴为平均 HDI）。}
+\label{fig:sigma-sensitivity}
+\end{figure}
+
+\section{预测校准}\label{app:auc}
+本附录提供 GBDT 前向链式验证的 AUC 结果，作为协变量有效性的鲁棒性检验。
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_auc_forward.pdf}
+\caption{分季 AUC 表现稳定（前向链式验证）。}
+\label{fig:auc-forward}
+\end{figure}
 
 \clearpage
 \section*{参考文献}
