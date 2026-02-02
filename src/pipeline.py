@@ -206,15 +206,9 @@ def build_long_df(df: pd.DataFrame) -> pd.DataFrame:
 # 规则约束与采样
 # =========================
 
-def percent_constraints_ok(v: np.ndarray, j_share: np.ndarray, elim_idx: List[int], alpha: float) -> bool:
-    """检查百分比规则淘汰约束是否满足。"""
-    if not elim_idx:
-        return True
-    c = alpha * j_share + (1 - alpha) * v
-    for e in elim_idx:
-        if np.any(c[e] > c + 1e-12):
-            return False
-    return True
+# ========== Hard-3 修复：删除错误的 percent_constraints_ok ==========
+# 原函数检查 c[e] > c（对所有选手），相当于要求淘汰者 <= 全场最小值
+# 正确的 bottom-k 判定应为 max(E) <= min(S) + eps_ord，已在 strict_feasible_mask 中实现
 
 
 def strict_feasible_check(
@@ -243,30 +237,47 @@ def strict_feasible_check(
 
 
 def strict_feasible_mask(
-    proposals: np.ndarray,
+    scores: np.ndarray,
     elim_idx: List[int],
     eps_sum: float = EPS_SUM,
     eps_ord: float = EPS_ORD,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Vectorized strict feasible check for proposals."""
-    if proposals.size == 0:
+    """
+    Vectorized strict feasible check for combined scores.
+    
+    参数：
+    - scores: (n_props, n) combined score matrix（不是 fan_share proposals！）
+    - elim_idx: 淘汰者索引列表
+    - eps_sum: simplex 约束容差（对于 combined score，此检查无意义，设为 inf）
+    - eps_ord: 淘汰约束容差（max(E) <= min(S) + eps_ord）
+    
+    返回：
+    - mask: (n_props,) 布尔数组，True 表示满足淘汰约束
+    - simplex_resid: 仅用于兼容性，对 combined score 无意义
+    - elim_resid: (n_props,) 淘汰残差 max(E) - min(S)
+    
+    注意：此函数检查的是 combined_score 的淘汰约束，不是 fan_share simplex！
+    simplex 约束应该在 proposals 上独立检查。
+    """
+    if scores.size == 0:
         return np.zeros(0, dtype=bool), np.array([]), np.array([])
-    sums = np.abs(proposals.sum(axis=1) - 1.0)
-    simplex_ok = (sums <= eps_sum) & (np.min(proposals, axis=1) >= -eps_ord)
+    # Combined score 不需要 simplex 检查（它不是概率分布）
+    # 但保留接口兼容性，返回 dummy 值
+    dummy_simplex_resid = np.zeros(len(scores))
     if len(elim_idx) == 0:
-        elim_resid = np.zeros(len(proposals))
-        return simplex_ok, sums, elim_resid
-    n = proposals.shape[1]
+        elim_resid = np.zeros(len(scores))
+        return np.ones(len(scores), dtype=bool), dummy_simplex_resid, elim_resid
+    n = scores.shape[1]
     elim_mask = np.zeros(n, dtype=bool)
     elim_mask[elim_idx] = True
     if np.all(elim_mask) or np.all(~elim_mask):
-        elim_resid = np.full(len(proposals), np.nan)
-        return np.zeros(len(proposals), dtype=bool), sums, elim_resid
-    max_e = np.max(proposals[:, elim_mask], axis=1)
-    min_s = np.min(proposals[:, ~elim_mask], axis=1)
+        elim_resid = np.full(len(scores), np.nan)
+        return np.zeros(len(scores), dtype=bool), dummy_simplex_resid, elim_resid
+    max_e = np.max(scores[:, elim_mask], axis=1)
+    min_s = np.min(scores[:, ~elim_mask], axis=1)
     elim_resid = max_e - min_s
     elim_ok = elim_resid <= eps_ord
-    return simplex_ok & elim_ok, sums, elim_resid
+    return elim_ok, dummy_simplex_resid, elim_resid
 
 
 # =========================
@@ -307,6 +318,8 @@ def compute_rule_diagnostics(week_df: pd.DataFrame, eps_ord: float = EPS_ORD, ep
         "percent_rule_diagnostic": 0,
         "rank_rule_residual": float("nan"),
         "rank_rule_diagnostic": 0,
+        "eliminated_k": 0,
+        "is_double_elim_week": 0,
     }
     
     if n == 0:
@@ -337,11 +350,17 @@ def compute_rule_diagnostics(week_df: pd.DataFrame, eps_ord: float = EPS_ORD, ep
     # 离散 rank 使用 eps_rank=0 判定（允许并列淘汰）
     rank_diagnostic = 1 if rank_residual <= eps_rank else 0
     
+    # ========== Hard-3：输出淘汰人数与双淘汰标记 ==========
+    eliminated_k = int(elim_mask.sum())
+    is_double_elim_week = int(eliminated_k == 2)
+    
     return {
         "percent_rule_residual": percent_residual,
         "percent_rule_diagnostic": percent_diagnostic,
         "rank_rule_residual": rank_residual,
         "rank_rule_diagnostic": rank_diagnostic,
+        "eliminated_k": eliminated_k,
+        "is_double_elim_week": is_double_elim_week,
     }
 
 
@@ -371,22 +390,35 @@ def sample_week_percent(
     # 2. 矩阵计算分数 (Combined Score)
     c_matrix = alpha * j + (1 - alpha) * proposals
 
-    # 3. 极简约束检查 (只看被淘汰者是否在底部附近)
+    # 3. Fast 约束检查（用于 violation_proxy 诊断，不影响 strict 筛选）
+    # ========== Hard-3 修复：使用正确的 bottom-k 判定 ==========
+    # 正确判定：max(score_E) <= min(score_S) + eps_ord（所有淘汰者都在底部）
     if not elim_idx:
         mask = np.ones(n_props, dtype=bool)
     else:
-        min_scores = c_matrix.min(axis=1)
-        # 只要任意一个淘汰者的分数 <= 最小值 + 容差，就算通过
-        elim_scores = c_matrix[:, elim_idx]
-        is_bottom = (elim_scores <= min_scores[:, None] + 1e-12)
-        mask = is_bottom.any(axis=1)
+        n_contestants = c_matrix.shape[1]
+        elim_mask_arr = np.zeros(n_contestants, dtype=bool)
+        elim_mask_arr[elim_idx] = True
+        # max(E) <= min(S) + eps_ord => bottom-k 判定（允许 ties）
+        max_e_scores = np.max(c_matrix[:, elim_mask_arr], axis=1)
+        min_s_scores = np.min(c_matrix[:, ~elim_mask_arr], axis=1)
+        mask = max_e_scores <= min_s_scores + 1e-12
 
     accepted = proposals[mask]
     n_accept = int(len(accepted))
     # violation_proxy：约束违反率（越高表示越不可信）
     violation_proxy = float(1.0 - mask.mean())
     feasible_flag = bool(mask.any())
-    strict_mask, simplex_resid, elim_resid = strict_feasible_mask(proposals, elim_idx, EPS_SUM, EPS_ORD)
+    
+    # ========== Hard-3 核心修复：淘汰约束必须在 combined_score (c_matrix) 上检查 ==========
+    # 1. proposals simplex 约束（sum=1, >=0）
+    simplex_resid = np.abs(proposals.sum(axis=1) - 1.0)
+    simplex_ok = (simplex_resid <= EPS_SUM) & (np.min(proposals, axis=1) >= -EPS_ORD)
+    # 2. 淘汰约束在 c_matrix 上检查（max(E) <= min(S)）
+    strict_mask, _, elim_resid = strict_feasible_mask(c_matrix, elim_idx, EPS_SUM, EPS_ORD)
+    # 3. 同时满足两个约束
+    strict_mask = strict_mask & simplex_ok
+    
     # Call scalar checker once to ensure strict feasibility logic is exercised
     if len(proposals) > 0:
         _ = strict_feasible_check(proposals[0], elim_idx, EPS_SUM, EPS_ORD)
@@ -1085,6 +1117,9 @@ def process_season_samples(
                 "percent_rule_diagnostic": int(rule_diag["percent_rule_diagnostic"]),
                 "rank_rule_residual": float(rule_diag["rank_rule_residual"]),
                 "rank_rule_diagnostic": int(rule_diag["rank_rule_diagnostic"]),
+                # ========== Hard-3：淘汰人数与双淘汰标记 ==========
+                "eliminated_k": int(rule_diag["eliminated_k"]),
+                "is_double_elim_week": int(rule_diag["is_double_elim_week"]),
                 "strict_feasible_flag": 0,
                 "used_fallback": 1,
                 "excluded_from_metrics": 1,
@@ -1135,6 +1170,9 @@ def process_season_samples(
             "percent_rule_diagnostic": int(rule_diag["percent_rule_diagnostic"]),
             "rank_rule_residual": float(rule_diag["rank_rule_residual"]),
             "rank_rule_diagnostic": int(rule_diag["rank_rule_diagnostic"]),
+            # ========== Hard-3：淘汰人数与双淘汰标记 ==========
+            "eliminated_k": int(rule_diag["eliminated_k"]),
+            "is_double_elim_week": int(rule_diag["is_double_elim_week"]),
             "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
             "used_fallback": int(meta.get("used_fallback", 0)),
             "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
@@ -1318,6 +1356,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                     "percent_rule_diagnostic": int(rule_diag["percent_rule_diagnostic"]),
                     "rank_rule_residual": float(rule_diag["rank_rule_residual"]),
                     "rank_rule_diagnostic": int(rule_diag["rank_rule_diagnostic"]),
+                    # ========== Hard-3：淘汰人数与双淘汰标记 ==========
+                    "eliminated_k": int(rule_diag["eliminated_k"]),
+                    "is_double_elim_week": int(rule_diag["is_double_elim_week"]),
                     "strict_feasible_flag": 0,
                     "used_fallback": 1,
                     "excluded_from_metrics": 1,
@@ -1372,6 +1413,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 "percent_rule_diagnostic": int(rule_diag["percent_rule_diagnostic"]),
                 "rank_rule_residual": float(rule_diag["rank_rule_residual"]),
                 "rank_rule_diagnostic": int(rule_diag["rank_rule_diagnostic"]),
+                # ========== Hard-3：淘汰人数与双淘汰标记 ==========
+                "eliminated_k": int(rule_diag["eliminated_k"]),
+                "is_double_elim_week": int(rule_diag["is_double_elim_week"]),
                 "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
                 "used_fallback": int(meta.get("used_fallback", 0)),
                 "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
@@ -1433,6 +1477,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         # Hard-0 诊断字段（不进入可行性判定，仅输出）：
         #   - percent_rule_residual/diagnostic: 基于原始数据的底层残差 + 判定（与采样解耦）
         #   - rank_rule_residual/diagnostic: 基于原始数据的底层残差 + 判定（与采样解耦）
+        # Hard-3 字段（淘汰人数与双淘汰标记）：
+        #   - eliminated_k: 该周淘汰人数
+        #   - is_double_elim_week: 1 当且仅当 eliminated_k == 2
         audit_cols = [
             "season",
             "week",
@@ -1449,6 +1496,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "percent_rule_diagnostic",
             "rank_rule_residual",
             "rank_rule_diagnostic",
+            "eliminated_k",
+            "is_double_elim_week",
             "feasible_flag",
             "fallback_flag",
             "strict_feasible_flag",
@@ -1499,6 +1548,36 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         log(f"Block5 Gate: excluded_ratio={excluded_ratio:.2%}, q_gate_accept={q_gate_accept:.4f}, recommended_by_q_gate={recommended_n_props}")
         if gate_triggered:
             log("WARNING: excluded_ratio >= 20%, season-level conclusions should be marked as exploratory")
+
+        # ========== Hard-3 验收统计：双淘汰 vs 单淘汰接受率比 ==========
+        # 目的：检测编码错误（如把 k=2 当成 k=1 或无约束）
+        # 预期：双淘汰约束更紧，接受率应该更低，因此 R < 1.0 是正常的
+        # 验收标准：R > 0.1（排除极端编码错误）且 < 5.0（排除反向错误）
+        double_elim_df = audit_meta_df[audit_meta_df["is_double_elim_week"] == 1] if "is_double_elim_week" in audit_meta_df else pd.DataFrame()
+        single_elim_df = audit_meta_df[(audit_meta_df["eliminated_k"] == 1)] if "eliminated_k" in audit_meta_df else pd.DataFrame()
+        
+        median_double = float(double_elim_df["accept_rate_strict"].median()) if len(double_elim_df) > 0 else float("nan")
+        median_single = float(single_elim_df["accept_rate_strict"].median()) if len(single_elim_df) > 0 else float("nan")
+        
+        if not np.isnan(median_double) and not np.isnan(median_single) and median_single > 0:
+            R_double_single = median_double / median_single
+        else:
+            R_double_single = float("nan")
+        
+        # 验收标准：R > 0.1（双淘汰约束更紧是正常的）且 < 5.0
+        hard3_check_pass = bool(0.1 < R_double_single < 5.0) if not np.isnan(R_double_single) else False
+        
+        double_elim_check = {
+            "n_double_elim_weeks": len(double_elim_df),
+            "n_single_elim_weeks": len(single_elim_df),
+            "median_accept_rate_strict_double": round(median_double, 6) if not np.isnan(median_double) else None,
+            "median_accept_rate_strict_single": round(median_single, 6) if not np.isnan(median_single) else None,
+            "R_double_vs_single": round(R_double_single, 4) if not np.isnan(R_double_single) else None,
+            "hard3_check_pass": hard3_check_pass,
+            "hard3_criterion": "0.1 < R < 5.0 (双淘汰约束更紧是正常的，R<1.0 预期)",
+        }
+        (OUTPUT_DIR / "audit_double_elim_check.json").write_text(json.dumps(double_elim_check, indent=2), encoding="utf-8")
+        log(f"Hard-3 Check: R={R_double_single:.4f}, pass={hard3_check_pass}" if not np.isnan(R_double_single) else "Hard-3 Check: insufficient data")
 
         tier_records = []
         for _, row in week_metrics_df.iterrows():
@@ -1819,13 +1898,22 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             proposals = np.maximum(proposals, EPSILON)
             proposals = proposals / proposals.sum(axis=1, keepdims=True)
 
+            # ========== Hard-3 核心修复：计算 combined score 用于淘汰约束检查 ==========
+            # 使用与主流程相同的 alpha=0.5（默认值，或从配置中获取）
+            alpha_fast_strict = 0.5
+            c_matrix = alpha_fast_strict * j_share + (1 - alpha_fast_strict) * proposals
+
             # ========== Hard-6 修复：fast vs strict 定义 ==========
             # fast check: 只做 simplex（v_i >= 0 且 sum(v)=1），是 strict 的严格子集
-            # strict check: simplex + elimination（完整约束集）
-            # 使用 strict_feasible_mask 获取 strict 样本，fast 只检查 simplex
-            strict_mask, simplex_resid, elim_resid = strict_feasible_mask(proposals, elim_idx, EPS_SUM, EPS_ORD)
+            # strict check: simplex + elimination（基于 combined score 的完整约束集）
+            # 1. simplex 约束（对 proposals）
+            simplex_ok = (np.abs(proposals.sum(axis=1) - 1.0) <= EPS_SUM) & (np.min(proposals, axis=1) >= -EPS_ORD)
+            # 2. 淘汰约束（对 c_matrix）
+            elim_mask, _, elim_resid = strict_feasible_mask(c_matrix, elim_idx, EPS_SUM, EPS_ORD)
+            # 3. strict mask = simplex + 淘汰
+            strict_mask = simplex_ok & elim_mask
             # fast mask: 只检查 simplex（不检查 elimination）
-            fast_mask = (np.abs(proposals.sum(axis=1) - 1.0) <= EPS_SUM) & (np.min(proposals, axis=1) >= -EPS_ORD)
+            fast_mask = simplex_ok
 
             fast_samples = proposals[fast_mask]
             strict_samples = proposals[strict_mask]
