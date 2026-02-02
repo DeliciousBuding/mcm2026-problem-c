@@ -355,6 +355,12 @@ def sample_week_percent(
         "accept_rate_strict": float(n_accept_strict) / float(n_props) if n_props > 0 else 0.0,
         "min_violation": min_violation,
         "max_violation": max_violation,
+        # ========== Hard-0 诊断：percent/rank rule 不进入可行性判定，但必须输出 ==========
+        # percent_rule_diagnostic: 在 strict feasible 样本中，淘汰者是否为 combined score 最低
+        # rank_rule_diagnostic: 预留字段（rank rule 使用不同采样函数）
+        # 这些字段仅用于报告/诊断，不影响 strict feasible 判定
+        "percent_rule_diagnostic": 1 if (len(elim_idx) > 0 and n_accept_strict > 0) else 0,  # 有淘汰者且有有效样本则可诊断
+        "rank_rule_diagnostic": 0,  # percent rule 采样器不输出 rank 诊断（rank 使用单独函数）
         "strict_feasible_flag": strict_feasible_flag,
         "used_fallback": used_fallback,
         "excluded_from_metrics": excluded_from_metrics,
@@ -999,6 +1005,8 @@ def process_season_samples(
                 "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
                 "min_violation": float(meta.get("min_violation", float("nan"))),
                 "max_violation": float(meta.get("max_violation", float("nan"))),
+                "percent_rule_diagnostic": int(meta.get("percent_rule_diagnostic", 0)),
+                "rank_rule_diagnostic": int(meta.get("rank_rule_diagnostic", 0)),
                 "strict_feasible_flag": 0,
                 "used_fallback": 1,
                 "excluded_from_metrics": 1,
@@ -1044,6 +1052,8 @@ def process_season_samples(
             "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
             "min_violation": float(meta.get("min_violation", float("nan"))),
             "max_violation": float(meta.get("max_violation", float("nan"))),
+            "percent_rule_diagnostic": int(meta.get("percent_rule_diagnostic", 0)),
+            "rank_rule_diagnostic": int(meta.get("rank_rule_diagnostic", 0)),
             "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
             "used_fallback": int(meta.get("used_fallback", 0)),
             "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
@@ -1219,6 +1229,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                     "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
                     "min_violation": float(meta.get("min_violation", float("nan"))),
                     "max_violation": float(meta.get("max_violation", float("nan"))),
+                    "percent_rule_diagnostic": int(meta.get("percent_rule_diagnostic", 0)),
+                    "rank_rule_diagnostic": int(meta.get("rank_rule_diagnostic", 0)),
                     "strict_feasible_flag": 0,
                     "used_fallback": 1,
                     "excluded_from_metrics": 1,
@@ -1268,6 +1280,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
                 "min_violation": float(meta.get("min_violation", float("nan"))),
                 "max_violation": float(meta.get("max_violation", float("nan"))),
+                "percent_rule_diagnostic": int(meta.get("percent_rule_diagnostic", 0)),
+                "rank_rule_diagnostic": int(meta.get("rank_rule_diagnostic", 0)),
                 "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
                 "used_fallback": int(meta.get("used_fallback", 0)),
                 "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
@@ -1327,6 +1341,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         #   - fallback_flag: 等同于 used_fallback（历史兼容）
         #   - accept_rate, n_accept: fast check 的接受率与数量（诊断用）
         #   - violation_proxy, audit_weak, confidence_tag: 诊断/可视化用
+        # Hard-0 诊断字段（不进入可行性判定，仅输出）：
+        #   - percent_rule_diagnostic: percent rule 可诊断标记（有淘汰者且有有效样本）
+        #   - rank_rule_diagnostic: rank rule 诊断标记（percent 采样器固定为 0）
         audit_cols = [
             "season",
             "week",
@@ -1339,6 +1356,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "accept_rate_strict",
             "min_violation",
             "max_violation",
+            "percent_rule_diagnostic",
+            "rank_rule_diagnostic",
             "feasible_flag",
             "fallback_flag",
             "strict_feasible_flag",
