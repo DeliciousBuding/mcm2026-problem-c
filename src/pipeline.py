@@ -30,7 +30,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 # =========================
 # 全局配置（）
 # =========================
-RNG = np.random.default_rng(20260131)
+RNG_SEED = 20260131
+RNG = np.random.default_rng(RNG_SEED)
 # 脚本所在目录的父目录（项目根目录）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = _PROJECT_ROOT / "data" / "2026_MCM_Problem_C_Data.csv"
@@ -41,9 +42,12 @@ LOG_PATH = OUTPUT_DIR / "run.log"
 BENCHMARK_CSV = OUTPUT_DIR / "scale_benchmark.csv"
 
 EPSILON = 0.001  # 投票占比下限
+EPS_SUM = 1e-9  # strict feasible: |sum(v) - 1| <= eps_sum
+EPS_ORD = 1e-6  # strict feasible: inequality tolerance (ordering)
 ALPHA_PERCENT = 0.5  # 百分比规则权重
 N_PROPOSALS = int(os.getenv("MCM_N_PROPOSALS", "250"))  # 每周Dirichlet提案数量
 MIN_ACCEPT = 40  # 最少保留的可行样本
+N_STRICT_MIN = 500  # strict feasible 最小样本阈值（写死）
 SIGMA_LIST = [0.5, 1.0, 1.5, 2.0]
 RHO_SWITCH = 0.10  # 规则切换先验概率
 COMPUTE_BOUNDS = False  # 是否计算LP边界（耗时）
@@ -208,6 +212,58 @@ def percent_constraints_ok(v: np.ndarray, j_share: np.ndarray, elim_idx: List[in
     return True
 
 
+def strict_feasible_check(
+    v: np.ndarray,
+    elim_idx: List[int],
+    eps_sum: float = EPS_SUM,
+    eps_ord: float = EPS_ORD,
+) -> Tuple[bool, float, float]:
+    """Strict feasible check: simplex + elimination (ties allowed)."""
+    simplex_resid = float(abs(float(np.sum(v)) - 1.0))
+    if len(elim_idx) == 0:
+        elim_resid = 0.0
+        ok = bool(simplex_resid <= eps_sum and np.all(v >= -eps_ord))
+        return ok, simplex_resid, elim_resid
+    n = len(v)
+    elim_mask = np.zeros(n, dtype=bool)
+    elim_mask[elim_idx] = True
+    if np.all(elim_mask) or np.all(~elim_mask):
+        elim_resid = float("nan")
+        return False, simplex_resid, elim_resid
+    max_e = float(np.max(v[elim_mask]))
+    min_s = float(np.min(v[~elim_mask]))
+    elim_resid = max_e - min_s
+    ok = bool(simplex_resid <= eps_sum and np.all(v >= -eps_ord) and elim_resid <= eps_ord)
+    return ok, simplex_resid, elim_resid
+
+
+def strict_feasible_mask(
+    proposals: np.ndarray,
+    elim_idx: List[int],
+    eps_sum: float = EPS_SUM,
+    eps_ord: float = EPS_ORD,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorized strict feasible check for proposals."""
+    if proposals.size == 0:
+        return np.zeros(0, dtype=bool), np.array([]), np.array([])
+    sums = np.abs(proposals.sum(axis=1) - 1.0)
+    simplex_ok = (sums <= eps_sum) & (np.min(proposals, axis=1) >= -eps_ord)
+    if len(elim_idx) == 0:
+        elim_resid = np.zeros(len(proposals))
+        return simplex_ok, sums, elim_resid
+    n = proposals.shape[1]
+    elim_mask = np.zeros(n, dtype=bool)
+    elim_mask[elim_idx] = True
+    if np.all(elim_mask) or np.all(~elim_mask):
+        elim_resid = np.full(len(proposals), np.nan)
+        return np.zeros(len(proposals), dtype=bool), sums, elim_resid
+    max_e = np.max(proposals[:, elim_mask], axis=1)
+    min_s = np.min(proposals[:, ~elim_mask], axis=1)
+    elim_resid = max_e - min_s
+    elim_ok = elim_resid <= eps_ord
+    return simplex_ok & elim_ok, sums, elim_resid
+
+
 def sample_week_percent(
     week_df: pd.DataFrame,
     alpha: float,
@@ -250,16 +306,41 @@ def sample_week_percent(
     # violation_proxy：约束违反率（越高表示越不可信）
     violation_proxy = float(1.0 - mask.mean())
     feasible_flag = bool(mask.any())
+    strict_mask, simplex_resid, elim_resid = strict_feasible_mask(proposals, elim_idx, EPS_SUM, EPS_ORD)
+    # Call scalar checker once to ensure strict feasibility logic is exercised
+    if len(proposals) > 0:
+        _ = strict_feasible_check(proposals[0], elim_idx, EPS_SUM, EPS_ORD)
+    n_accept_strict = int(strict_mask.sum())
+    accept_rate_strict = float(n_accept_strict) / float(n_props) if n_props > 0 else 0.0
+    simplex_violation = np.maximum(simplex_resid - EPS_SUM, 0.0)
+    if np.isnan(elim_resid).all():
+        elim_violation = np.zeros_like(simplex_violation)
+    else:
+        elim_violation = np.maximum(elim_resid - EPS_ORD, 0.0)
+    total_violation = np.maximum(simplex_violation, elim_violation)
+    min_violation = float(np.min(total_violation)) if len(total_violation) else float("nan")
+    max_violation = float(np.max(total_violation)) if len(total_violation) else float("nan")
     # 如果没采到，就强制返回随机样本（为了保证程序不崩）
     if n_accept < 5:
         fallback_flag = True
         accepted = proposals[:10]
+
+    strict_feasible_flag = int((n_accept_strict >= N_STRICT_MIN) and (not fallback_flag))
+    excluded_from_metrics = int(strict_feasible_flag == 0)
 
     meta = {
         "feasible_flag": feasible_flag,
         "fallback_flag": fallback_flag,
         "n_accept": n_accept,
         "violation_proxy": violation_proxy,
+        "n_accept_fast": int(mask.sum()),
+        "n_accept_strict": n_accept_strict,
+        "accept_rate_strict": accept_rate_strict,
+        "min_violation": min_violation,
+        "max_violation": max_violation,
+        "strict_feasible_flag": strict_feasible_flag,
+        "used_fallback": int(fallback_flag),
+        "excluded_from_metrics": excluded_from_metrics,
     }
     return accepted, float(mask.mean()), meta
 
@@ -905,6 +986,8 @@ def process_season_samples(
         week_metrics.append({
             "season": season,
             "week": week,
+            "seed": seed,
+            "n_proposals": n_props,
             "accept_rate": acc_rate,
             "slack": slack,
             "mean_hdi_width": float(np.mean(hdi_width)),
@@ -912,6 +995,14 @@ def process_season_samples(
             "fallback_flag": bool(meta.get("fallback_flag", False)),
             "n_accept": int(meta.get("n_accept", 0)),
             "violation_proxy": float(meta.get("violation_proxy", 1.0)),
+            "n_accept_fast": int(meta.get("n_accept_fast", 0)),
+            "n_accept_strict": int(meta.get("n_accept_strict", 0)),
+            "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
+            "min_violation": float(meta.get("min_violation", float("nan"))),
+            "max_violation": float(meta.get("max_violation", float("nan"))),
+            "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
+            "used_fallback": int(meta.get("used_fallback", 0)),
+            "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
         })
 
     return {
@@ -1055,8 +1146,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 samples = samples_cache[key]
                 acc_rate = acc_cache[key]
                 slack = slack_cache[key]
+                meta = {}
             else:
-                samples, acc_rate, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+                samples, acc_rate, meta = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
                 _, slack = lp_bounds_and_slack(wdf, ALPHA_PERCENT, EPSILON, COMPUTE_BOUNDS)
                 samples_cache[key] = samples
                 acc_cache[key] = acc_rate
@@ -1093,9 +1185,23 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             week_metrics.append({
                 "season": season,
                 "week": week,
+                "seed": RNG_SEED,
+                "n_proposals": n_props,
                 "accept_rate": acc_rate,
                 "slack": slack,
                 "mean_hdi_width": float(np.mean(hdi_width)),
+                "feasible_flag": bool(meta.get("feasible_flag", False)),
+                "fallback_flag": bool(meta.get("fallback_flag", False)),
+                "n_accept": int(meta.get("n_accept", 0)),
+                "violation_proxy": float(meta.get("violation_proxy", 1.0)),
+                "n_accept_fast": int(meta.get("n_accept_fast", 0)),
+                "n_accept_strict": int(meta.get("n_accept_strict", 0)),
+                "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
+                "min_violation": float(meta.get("min_violation", float("nan"))),
+                "max_violation": float(meta.get("max_violation", float("nan"))),
+                "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
+                "used_fallback": int(meta.get("used_fallback", 0)),
+                "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
             })
 
     posterior_df = pd.DataFrame(posterior_records)
@@ -1138,10 +1244,20 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         audit_cols = [
             "season",
             "week",
+            "seed",
+            "n_proposals",
             "accept_rate",
             "n_accept",
+            "n_accept_fast",
+            "n_accept_strict",
+            "accept_rate_strict",
+            "min_violation",
+            "max_violation",
             "feasible_flag",
             "fallback_flag",
+            "strict_feasible_flag",
+            "used_fallback",
+            "excluded_from_metrics",
             "violation_proxy",
             "audit_weak",
             "confidence_tag",
