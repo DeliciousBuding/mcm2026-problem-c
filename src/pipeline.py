@@ -302,7 +302,6 @@ def sample_week_percent(
 
     accepted = proposals[mask]
     n_accept = int(len(accepted))
-    fallback_flag = False
     # violation_proxy：约束违反率（越高表示越不可信）
     violation_proxy = float(1.0 - mask.mean())
     feasible_flag = bool(mask.any())
@@ -310,8 +309,6 @@ def sample_week_percent(
     # Call scalar checker once to ensure strict feasibility logic is exercised
     if len(proposals) > 0:
         _ = strict_feasible_check(proposals[0], elim_idx, EPS_SUM, EPS_ORD)
-    n_accept_strict = int(strict_mask.sum())
-    accept_rate_strict = float(n_accept_strict) / float(n_props) if n_props > 0 else 0.0
     simplex_violation = np.maximum(simplex_resid - EPS_SUM, 0.0)
     if np.isnan(elim_resid).all():
         elim_violation = np.zeros_like(simplex_violation)
@@ -320,29 +317,45 @@ def sample_week_percent(
     total_violation = np.maximum(simplex_violation, elim_violation)
     min_violation = float(np.min(total_violation)) if len(total_violation) else float("nan")
     max_violation = float(np.max(total_violation)) if len(total_violation) else float("nan")
-    # 如果没采到，就强制返回随机样本（为了保证程序不崩）
-    if n_accept < 5:
-        fallback_flag = True
-        accepted = proposals[:10]
 
-    strict_feasible_flag = int((n_accept_strict >= N_STRICT_MIN) and (not fallback_flag))
+    # ========== Hard-1/6 修复：禁止不可行样本 fallback ==========
+    # strict feasible 样本用于后验/HDI/机制指标
+    # fast feasible 样本仅用于快速筛选（mask），不参与指标计算
+    # 如果 strict feasible 样本数 < N_STRICT_MIN，则该周 excluded_from_metrics=1，valid_week=0
+    strict_accepted = proposals[strict_mask]  # 只使用通过 strict check 的样本
+    n_accept_strict = int(len(strict_accepted))
+
+    # 判断是否采样失败（strict 不足阈值）
+    used_fallback = int(n_accept_strict < N_STRICT_MIN)
+    # strict_feasible_flag: 仅当 strict 样本数 >= N_STRICT_MIN 时为 1
+    strict_feasible_flag = int(n_accept_strict >= N_STRICT_MIN)
     excluded_from_metrics = int(strict_feasible_flag == 0)
+    valid_week = int(strict_feasible_flag == 1)
+
+    # 重要：返回的样本必须是 strict feasible 样本，不是 fast feasible
+    # 如果 strict 不足，返回空数组（不再 fallback 到 proposals[:10]）
+    if strict_feasible_flag:
+        accepted_for_metrics = strict_accepted
+    else:
+        # 采样不足时返回空数组，不做任何 fallback
+        accepted_for_metrics = np.empty((0, n))
 
     meta = {
         "feasible_flag": feasible_flag,
-        "fallback_flag": fallback_flag,
-        "n_accept": n_accept,
+        "fallback_flag": bool(not strict_feasible_flag),  # 兼容旧字段名
+        "n_accept": n_accept,  # fast accept count (用于诊断)
         "violation_proxy": violation_proxy,
-        "n_accept_fast": int(mask.sum()),
-        "n_accept_strict": n_accept_strict,
-        "accept_rate_strict": accept_rate_strict,
+        "n_accept_fast": int(mask.sum()),  # fast check 通过数
+        "n_accept_strict": n_accept_strict,  # strict check 通过数
+        "accept_rate_strict": float(n_accept_strict) / float(n_props) if n_props > 0 else 0.0,
         "min_violation": min_violation,
         "max_violation": max_violation,
         "strict_feasible_flag": strict_feasible_flag,
-        "used_fallback": int(fallback_flag),
+        "used_fallback": used_fallback,
         "excluded_from_metrics": excluded_from_metrics,
+        "valid_week": valid_week,
     }
-    return accepted, float(mask.mean()), meta
+    return accepted_for_metrics, float(mask.mean()), meta
 
 
 def lp_bounds_and_slack(week_df, alpha, epsilon, compute_bounds):
@@ -959,7 +972,33 @@ def process_season_samples(
         acc_cache[key] = acc_rate
         slack_cache[key] = slack
 
+        # ========== Hard-1/6: 即使 strict 不足，也要记录周元数据 ==========
+        # 如果 strict feasible 样本不足，该周 excluded_from_metrics=1，valid_week=0
+        # 但元数据仍需记录（用于 audit），指标字段为 NaN
         if len(samples) == 0:
+            # 无有效样本，记录元数据但指标为 NaN
+            week_metrics.append({
+                "season": season,
+                "week": week,
+                "seed": seed,
+                "n_proposals": n_props,
+                "accept_rate": acc_rate,
+                "slack": slack,
+                "mean_hdi_width": float("nan"),  # 无有效样本
+                "feasible_flag": bool(meta.get("feasible_flag", False)),
+                "fallback_flag": bool(meta.get("fallback_flag", True)),
+                "n_accept": int(meta.get("n_accept", 0)),
+                "violation_proxy": float(meta.get("violation_proxy", 1.0)),
+                "n_accept_fast": int(meta.get("n_accept_fast", 0)),
+                "n_accept_strict": int(meta.get("n_accept_strict", 0)),
+                "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
+                "min_violation": float(meta.get("min_violation", float("nan"))),
+                "max_violation": float(meta.get("max_violation", float("nan"))),
+                "strict_feasible_flag": 0,
+                "used_fallback": 1,
+                "excluded_from_metrics": 1,
+                "valid_week": 0,
+            })
             continue
 
         lower = np.quantile(samples, 0.025, axis=0)
@@ -990,7 +1029,7 @@ def process_season_samples(
             "n_proposals": n_props,
             "accept_rate": acc_rate,
             "slack": slack,
-            "mean_hdi_width": float(np.mean(hdi_width)),
+            "mean_hdi_width": float(np.mean(hdi_width)) if len(hdi_width) > 0 else float("nan"),
             "feasible_flag": bool(meta.get("feasible_flag", False)),
             "fallback_flag": bool(meta.get("fallback_flag", False)),
             "n_accept": int(meta.get("n_accept", 0)),
@@ -1003,6 +1042,7 @@ def process_season_samples(
             "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
             "used_fallback": int(meta.get("used_fallback", 0)),
             "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
+            "valid_week": int(meta.get("valid_week", 0)),
         })
 
     return {
@@ -1154,9 +1194,33 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 acc_cache[key] = acc_rate
                 slack_cache[key] = slack
 
-            # 计算HDI
+            # ========== Hard-1/6: 即使 strict 不足，也要记录周元数据 ==========
             if len(samples) == 0:
+                # 无有效样本，记录元数据但指标为 NaN
+                week_metrics.append({
+                    "season": season,
+                    "week": week,
+                    "seed": RNG_SEED,
+                    "n_proposals": n_props,
+                    "accept_rate": acc_rate,
+                    "slack": slack,
+                    "mean_hdi_width": float("nan"),
+                    "feasible_flag": bool(meta.get("feasible_flag", False)),
+                    "fallback_flag": bool(meta.get("fallback_flag", True)),
+                    "n_accept": int(meta.get("n_accept", 0)),
+                    "violation_proxy": float(meta.get("violation_proxy", 1.0)),
+                    "n_accept_fast": int(meta.get("n_accept_fast", 0)),
+                    "n_accept_strict": int(meta.get("n_accept_strict", 0)),
+                    "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
+                    "min_violation": float(meta.get("min_violation", float("nan"))),
+                    "max_violation": float(meta.get("max_violation", float("nan"))),
+                    "strict_feasible_flag": 0,
+                    "used_fallback": 1,
+                    "excluded_from_metrics": 1,
+                    "valid_week": 0,
+                })
                 continue
+
             # 抽样降采样，控制计算量
             if len(samples) > MAX_SAMPLES_PER_WEEK:
                 idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
@@ -1189,7 +1253,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 "n_proposals": n_props,
                 "accept_rate": acc_rate,
                 "slack": slack,
-                "mean_hdi_width": float(np.mean(hdi_width)),
+                "mean_hdi_width": float(np.mean(hdi_width)) if len(hdi_width) > 0 else float("nan"),
                 "feasible_flag": bool(meta.get("feasible_flag", False)),
                 "fallback_flag": bool(meta.get("fallback_flag", False)),
                 "n_accept": int(meta.get("n_accept", 0)),
@@ -1202,6 +1266,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
                 "used_fallback": int(meta.get("used_fallback", 0)),
                 "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
+                "valid_week": int(meta.get("valid_week", 0)),
             })
 
     posterior_df = pd.DataFrame(posterior_records)
@@ -1258,12 +1323,13 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "strict_feasible_flag",
             "used_fallback",
             "excluded_from_metrics",
+            "valid_week",
             "violation_proxy",
             "audit_weak",
             "confidence_tag",
         ]
         audit_meta_df = week_metrics_df.loc[:, [c for c in audit_cols if c in week_metrics_df.columns]].copy()
-        audit_meta_df.to_csv(OUTPUT_DIR / "audit_week_meta.csv", index=False, encoding="utf-8")
+        audit_meta_df.to_csv(OUTPUT_DIR / "audit_week_meta.csv", index=False, encoding="utf-8", float_format="%.8f")
 
         tier_records = []
         for _, row in week_metrics_df.iterrows():
@@ -1454,9 +1520,13 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         key = (int(season), int(week))
         samples = samples_cache.get(key)
         if samples is None or len(samples) == 0:
-            samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+            samples, _, meta = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
             samples_cache[key] = samples
+        # ========== Hard-1/6: strict 不足时跳过机制指标计算 ==========
+        # 只有 strict feasible 样本才用于机制指标计算
+        # 如果样本数 < N_STRICT_MIN（见 sample_week_percent 中的判定），该周被排除
         if len(samples) == 0:
+            # 该周 excluded_from_metrics=1，不参与指标计算
             continue
 
         # 计算U_t
@@ -1580,15 +1650,22 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             proposals = np.maximum(proposals, EPSILON)
             proposals = proposals / proposals.sum(axis=1, keepdims=True)
 
-            mask_fast = apply_percent_mask(proposals, j_share, elim_idx, ALPHA_PERCENT, "fast")
-            mask_strict = apply_percent_mask(proposals, j_share, elim_idx, ALPHA_PERCENT, "strict")
+            # ========== Hard-6 修复：fast vs strict 定义 ==========
+            # fast check: 只做 simplex（v_i >= 0 且 sum(v)=1），是 strict 的严格子集
+            # strict check: simplex + elimination（完整约束集）
+            # 使用 strict_feasible_mask 获取 strict 样本，fast 只检查 simplex
+            strict_mask, simplex_resid, elim_resid = strict_feasible_mask(proposals, elim_idx, EPS_SUM, EPS_ORD)
+            # fast mask: 只检查 simplex（不检查 elimination）
+            fast_mask = (np.abs(proposals.sum(axis=1) - 1.0) <= EPS_SUM) & (np.min(proposals, axis=1) >= -EPS_ORD)
 
-            fast_samples = proposals[mask_fast]
-            strict_samples = proposals[mask_strict]
-            if len(fast_samples) < MIN_ACCEPT:
-                fast_samples = fallback_by_violation(proposals, j_share, elim_idx, ALPHA_PERCENT, MIN_ACCEPT)
-            if len(strict_samples) < MIN_ACCEPT:
-                strict_samples = fallback_by_violation(proposals, j_share, elim_idx, ALPHA_PERCENT, MIN_ACCEPT)
+            fast_samples = proposals[fast_mask]
+            strict_samples = proposals[strict_mask]
+
+            # ========== Hard-1/6: 禁止 fallback ==========
+            # 不再使用 fallback_by_violation！如果 strict 样本不足 N_STRICT_MIN，跳过该周
+            if len(strict_samples) < N_STRICT_MIN:
+                # 该周 strict 样本不足，不参与 fast vs strict 比较
+                continue
 
             if len(fast_samples) > FAST_STRICT_MAX_SAMPLES:
                 idx = rng.choice(len(fast_samples), size=FAST_STRICT_MAX_SAMPLES, replace=False)
@@ -1705,79 +1782,89 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     # =========================
     log("Fitting effects models...")
     model_df = posterior_df.copy()
-    model_df = model_df.dropna(subset=["fan_share_mean", "judge_share"])  # 防止空值
-    model_df["age"] = model_df["celebrity_age_during_season"].astype(float)
-
-    def logit(p: float) -> float:
-        p = np.clip(p, 1e-3, 1 - 1e-3)
-        return float(np.log(p / (1 - p)))
-
-    model_df["y_j"] = model_df["judge_share"].apply(logit)
-    model_df["y_f"] = model_df["fan_share_mean"].apply(logit)
-
-    if USE_MIXED_MODEL:
-        # Judges model
-        try:
-            md_j = smf.mixedlm("y_j ~ age + C(celebrity_industry)", model_df, groups=model_df["ballroom_partner"], vc_formula={"season": "0 + C(season)"})
-            m_j = md_j.fit(reml=False)
-            re_j = m_j.random_effects
-            fe_j = m_j.params
-        except Exception:
-            m_j = smf.ols("y_j ~ age + C(celebrity_industry)", model_df).fit()
-            re_j = {}
-            fe_j = m_j.params
-
-        # Fans model
-        try:
-            md_f = smf.mixedlm("y_f ~ age + C(celebrity_industry)", model_df, groups=model_df["ballroom_partner"], vc_formula={"season": "0 + C(season)"})
-            m_f = md_f.fit(reml=False)
-            re_f = m_f.random_effects
-            fe_f = m_f.params
-        except Exception:
-            m_f = smf.ols("y_f ~ age + C(celebrity_industry)", model_df).fit()
-            re_f = {}
-            fe_f = m_f.params
-
-        pro_effects = pd.DataFrame({"pro": list(set(model_df["ballroom_partner"]))})
-        pro_effects["effect_j"] = pro_effects["pro"].apply(lambda p: re_j.get(p, {}).get("Group", 0.0) if isinstance(re_j.get(p, None), dict) else 0.0)
-        pro_effects["effect_f"] = pro_effects["pro"].apply(lambda p: re_f.get(p, {}).get("Group", 0.0) if isinstance(re_f.get(p, None), dict) else 0.0)
-        pro_effects["se"] = np.std(pro_effects[["effect_j", "effect_f"]].to_numpy()) if len(pro_effects) > 1 else 0.1
+    # ========== Hard-1/6: 当所有周都被排除时，posterior_df 为空 ==========
+    pro_effects = pd.DataFrame(columns=["pro", "effect_j", "effect_f", "se"])  # 默认空
+    if model_df.empty or "fan_share_mean" not in model_df.columns or "judge_share" not in model_df.columns:
+        log("Warning: No valid posterior data for effects models (all weeks excluded)")
     else:
-        # 快速版本，使用OLS并用残差均值近似pro效应
-        m_j = smf.ols("y_j ~ age + C(celebrity_industry)", model_df).fit()
-        m_f = smf.ols("y_f ~ age + C(celebrity_industry)", model_df).fit()
-        fe_j = m_j.params
-        fe_f = m_f.params
-        model_df["res_j"] = m_j.resid
-        model_df["res_f"] = m_f.resid
-        pro_effects = model_df.groupby("ballroom_partner")[["res_j", "res_f"]].mean().reset_index()
-        pro_effects = pro_effects.rename(columns={"ballroom_partner": "pro", "res_j": "effect_j", "res_f": "effect_f"})
-        pro_effects["se"] = model_df[["res_j", "res_f"]].stack().std() if len(model_df) > 1 else 0.1
+        model_df = model_df.dropna(subset=["fan_share_mean", "judge_share"])  # 防止空值
+        if model_df.empty:
+            log("Warning: All posterior data is NaN")
+        else:
+            model_df["age"] = model_df["celebrity_age_during_season"].astype(float)
+
+            def logit(p: float) -> float:
+                p = np.clip(p, 1e-3, 1 - 1e-3)
+                return float(np.log(p / (1 - p)))
+
+            model_df["y_j"] = model_df["judge_share"].apply(logit)
+            model_df["y_f"] = model_df["fan_share_mean"].apply(logit)
+
+            if USE_MIXED_MODEL:
+                # Judges model
+                try:
+                    md_j = smf.mixedlm("y_j ~ age + C(celebrity_industry)", model_df, groups=model_df["ballroom_partner"], vc_formula={"season": "0 + C(season)"})
+                    m_j = md_j.fit(reml=False)
+                    re_j = m_j.random_effects
+                    fe_j = m_j.params
+                except Exception:
+                    m_j = smf.ols("y_j ~ age + C(celebrity_industry)", model_df).fit()
+                    re_j = {}
+                    fe_j = m_j.params
+
+                # Fans model
+                try:
+                    md_f = smf.mixedlm("y_f ~ age + C(celebrity_industry)", model_df, groups=model_df["ballroom_partner"], vc_formula={"season": "0 + C(season)"})
+                    m_f = md_f.fit(reml=False)
+                    re_f = m_f.random_effects
+                    fe_f = m_f.params
+                except Exception:
+                    m_f = smf.ols("y_f ~ age + C(celebrity_industry)", model_df).fit()
+                    re_f = {}
+                    fe_f = m_f.params
+
+                pro_effects = pd.DataFrame({"pro": list(set(model_df["ballroom_partner"]))})
+                pro_effects["effect_j"] = pro_effects["pro"].apply(lambda p: re_j.get(p, {}).get("Group", 0.0) if isinstance(re_j.get(p, None), dict) else 0.0)
+                pro_effects["effect_f"] = pro_effects["pro"].apply(lambda p: re_f.get(p, {}).get("Group", 0.0) if isinstance(re_f.get(p, None), dict) else 0.0)
+                pro_effects["se"] = np.std(pro_effects[["effect_j", "effect_f"]].to_numpy()) if len(pro_effects) > 1 else 0.1
+            else:
+                # 快速版本，使用OLS并用残差均值近似pro效应
+                m_j = smf.ols("y_j ~ age + C(celebrity_industry)", model_df).fit()
+                m_f = smf.ols("y_f ~ age + C(celebrity_industry)", model_df).fit()
+                fe_j = m_j.params
+                fe_f = m_f.params
+                model_df["res_j"] = m_j.resid
+                model_df["res_f"] = m_f.resid
+                pro_effects = model_df.groupby("ballroom_partner")[["res_j", "res_f"]].mean().reset_index()
+                pro_effects = pro_effects.rename(columns={"ballroom_partner": "pro", "res_j": "effect_j", "res_f": "effect_f"})
+                pro_effects["se"] = model_df[["res_j", "res_f"]].stack().std() if len(model_df) > 1 else 0.1
 
     # =========================
     # 预测模型（XGBoost替代）
     # =========================
     log("Training predictive model (GBDT)...")
     pred_df = posterior_df.copy()
-    pred_df["eliminated"] = pred_df["is_eliminated_week"].astype(int)
-    pred_df["age"] = pred_df["celebrity_age_during_season"].astype(float)
-    features = ["age", "celebrity_industry", "ballroom_partner"]
-    X = pd.get_dummies(pred_df[features], drop_first=True)
-    y = pred_df["eliminated"].to_numpy()
-    seasons = pred_df["season"].to_numpy()
+    auc_df = pd.DataFrame(columns=["season", "auc"])  # 默认空
+    if not pred_df.empty and "is_eliminated_week" in pred_df.columns:
+        pred_df["eliminated"] = pred_df["is_eliminated_week"].astype(int)
+        pred_df["age"] = pred_df["celebrity_age_during_season"].astype(float)
+        features = ["age", "celebrity_industry", "ballroom_partner"]
+        X = pd.get_dummies(pred_df[features], drop_first=True)
+        y = pred_df["eliminated"].to_numpy()
+        seasons = pred_df["season"].to_numpy()
 
-    auc_records = []
-    for s in sorted(pred_df["season"].unique()):
-        train_mask = seasons < s
-        test_mask = seasons == s
-        if train_mask.sum() < 50 or test_mask.sum() < 10:
-            continue
-        clf = HistGradientBoostingClassifier(max_depth=4, learning_rate=0.1)
-        clf.fit(X[train_mask], y[train_mask])
-        prob = clf.predict_proba(X[test_mask])[:, 1]
-        auc = roc_auc_score(y[test_mask], prob)
-        auc_records.append({"season": s, "auc": auc})
-    auc_df = pd.DataFrame(auc_records)
+        auc_records = []
+        for s in sorted(pred_df["season"].unique()):
+            train_mask = seasons < s
+            test_mask = seasons == s
+            if train_mask.sum() < 50 or test_mask.sum() < 10:
+                continue
+            clf = HistGradientBoostingClassifier(max_depth=4, learning_rate=0.1)
+            clf.fit(X[train_mask], y[train_mask])
+            prob = clf.predict_proba(X[test_mask])[:, 1]
+            auc = roc_auc_score(y[test_mask], prob)
+            auc_records.append({"season": s, "auc": auc})
+        auc_df = pd.DataFrame(auc_records)
 
     # =========================
     # 图表输出
