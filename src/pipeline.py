@@ -273,17 +273,30 @@ def strict_feasible_mask(
 # 规则一致性诊断（与采样解耦）
 # =========================
 
-def compute_rule_diagnostics(week_df: pd.DataFrame, eps_ord: float = EPS_ORD) -> Dict[str, float]:
+# ========== 诊断阈值定义（写死）==========
+# eps_ord: 用于连续值（share/score）的比较容差
+# eps_rank: 用于离散 rank 的比较（允许并列淘汰时 <=0，不允许时 <0）
+EPS_RANK = 0  # 离散 rank 阈值：允许并列淘汰（residual <= 0 即满足）
+
+
+def compute_rule_diagnostics(week_df: pd.DataFrame, eps_ord: float = EPS_ORD, eps_rank: float = EPS_RANK) -> Dict[str, float]:
     """
     计算 percent/rank 规则一致性诊断（仅依赖原始数据，与采样完全解耦）。
     
     定义：
     - percent_rule_residual = max(judge_share_E) - min(judge_share_S)
     - percent_rule_diagnostic = 1 if percent_rule_residual <= eps_ord else 0
-    - rank_rule_residual = max(judge_rank_E) - min(judge_rank_S)  [rank: 1=best, N=worst]
-    - rank_rule_diagnostic = 1 if rank_rule_residual <= eps_ord else 0
+    - rank_rule_residual = max(judge_rank_E) - min(judge_rank_S)  [rank 为离散整数]
+    - rank_rule_diagnostic = 1 if rank_rule_residual <= eps_rank else 0
     
-    注：这些诊断仅用于报告"题面规则是否在原始数据下被满足"，不影响 strict feasible 判定。
+    口径说明：
+    - percent_rule 使用 judge_share 作为 audit proxy（我们建模中用于淘汰判定的 percent 代理）
+    - rank_rule 使用 judge_share 排序后的离散 rank（1=最低分, N=最高分）
+    - 这些诊断仅用于报告"题面规则是否在原始数据下被满足"，不影响 strict feasible 判定
+    
+    阈值口径（写死）：
+    - eps_ord = 1e-6：连续值（share）比较容差
+    - eps_rank = 0：离散 rank 阈值，允许并列淘汰（residual <= 0 即满足）
     """
     active_df = week_df[week_df["active"]].copy()
     n = len(active_df)
@@ -304,24 +317,25 @@ def compute_rule_diagnostics(week_df: pd.DataFrame, eps_ord: float = EPS_ORD) ->
         # 无淘汰者或全部被淘汰（边界情况）
         return default
     
-    # ========== Percent Rule: 基于 judge_share ==========
-    # 淘汰者的 judge_share 应为最低（允许 ties）
+    # ========== Percent Rule: 基于 judge_share（作为 audit proxy）==========
+    # 口径：judge_share 是我们建模中用于淘汰判定的 percent 代理
+    # 淘汰者的 judge_share 应为最低（允许 ties，容差 eps_ord）
     judge_share = active_df["judge_share"].to_numpy()
     max_e_share = float(np.max(judge_share[elim_mask]))
     min_s_share = float(np.min(judge_share[~elim_mask]))
     percent_residual = max_e_share - min_s_share
     percent_diagnostic = 1 if percent_residual <= eps_ord else 0
     
-    # ========== Rank Rule: 基于 judge_rank (ascending=True, 低分=低排名=差) ==========
-    # rank: 1=最高分, N=最低分；淘汰者的 rank 应接近 N（即 rank 值最大）
-    # 我们检查：淘汰者的 rank 是否在 bottom-k（即 rank 最大的 k 个）
-    judge_rank = active_df["judge_share"].rank(ascending=True, method="average").to_numpy()
+    # ========== Rank Rule: 基于离散 rank（从 judge_share 排序得出）==========
     # rank ascending=True: 最低 share → rank=1, 最高 share → rank=N
-    # 淘汰者应该是 rank 最小的（share 最低）
-    max_e_rank = float(np.max(judge_rank[elim_mask]))  # 淘汰者中最高的 rank（应接近淘汰阈值）
+    # 淘汰者应该是 rank 最小的（share 最低，即 rank 值小）
+    # 检查：淘汰者的最大 rank 是否 <= 存活者的最小 rank（允许并列）
+    judge_rank = active_df["judge_share"].rank(ascending=True, method="average").to_numpy()
+    max_e_rank = float(np.max(judge_rank[elim_mask]))  # 淘汰者中最高的 rank
     min_s_rank = float(np.min(judge_rank[~elim_mask]))  # 存活者中最低的 rank
     rank_residual = max_e_rank - min_s_rank
-    rank_diagnostic = 1 if rank_residual <= eps_ord else 0
+    # 离散 rank 使用 eps_rank=0 判定（允许并列淘汰）
+    rank_diagnostic = 1 if rank_residual <= eps_rank else 0
     
     return {
         "percent_rule_residual": percent_residual,
@@ -1475,6 +1489,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "N_STRICT_MIN": N_STRICT_MIN,
             "N_PROPOSALS_FAST": N_PROPOSALS_FAST,
             "gate_triggered_20pct": gate_triggered,
+            # ========== 诊断阈值口径（写死）==========
+            "EPS_SUM": EPS_SUM,
+            "EPS_ORD": EPS_ORD,
+            "EPS_RANK": EPS_RANK,
+            "diagnostic_score_source": "judge_share (audit proxy for percent rule)",
         }
         (OUTPUT_DIR / "audit_block5_gate.json").write_text(json.dumps(gate_info, indent=2), encoding="utf-8")
         log(f"Block5 Gate: excluded_ratio={excluded_ratio:.2%}, q_gate_accept={q_gate_accept:.4f}, recommended_by_q_gate={recommended_n_props}")

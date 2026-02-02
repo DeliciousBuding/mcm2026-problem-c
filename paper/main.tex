@@ -621,7 +621,8 @@ All parameters below are fixed \emph{a priori}; they are not tuned based on resu
 Parameter & Value & Type & Description \\
 \midrule
 $\varepsilon_{\text{sum}}$ & $10^{-9}$ & Audit rule & Simplex sum tolerance \\
-$\varepsilon_{\text{ord}}$ & $10^{-6}$ & Audit rule & Elimination ordering tolerance \\
+$\varepsilon_{\text{ord}}$ & $10^{-6}$ & Audit rule & Elimination ordering tolerance (continuous) \\
+$\varepsilon_{\text{rank}}$ & 0 & Audit rule & Rank ordering tolerance (discrete; ties allowed) \\
 $N_{\text{strict,min}}$ & 500 & Audit rule & Minimum strict feasible samples \\
 $q_{\text{gate}}$ & 0.10 & Audit rule & Quantile for budget calculation \\
 $r_{\text{excl,max}}$ & 20\% & Reporting rule & Downgrade trigger threshold \\
@@ -639,6 +640,8 @@ $N_{\text{proposals,fast}}$ & 2000 & Compute budget & Fast mode (smoke tests onl
 \item \textbf{Ties allowed}: Eliminated contestants may tie with survivors ($\max E = \min S$).
 \item \textbf{Excluded weeks}: Flagged as Audit-Weak, shown as marked points, not in aggregates.
 \item \textbf{Worst-case disclosure}: Weeks with accept rate $\approx 0.008$ may be excluded; this is expected.
+\item \textbf{Diagnostic score source}: Percent-rule diagnostics use \texttt{judge\_share} as an audit proxy for the combined percent score used in our elimination model.
+\item \textbf{Rank threshold}: $\varepsilon_{\text{rank}}=0$ means eliminated contestants' rank must be $\le$ survivors' rank (ties allowed).
 \end{itemize}
 
 \clearpage
