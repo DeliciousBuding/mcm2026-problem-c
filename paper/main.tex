@@ -345,7 +345,9 @@ N_{\text{proposals}} \ge \left\lceil \frac{N_{\text{strict,min}}}{q_{0.10}(\text
 The quantile $q = 0.10$ is fixed as non-adjustable policy. In our data, $q_{0.10} \approx 0.07$, yielding a recommended budget $\approx 7159$; we set $N_{\text{proposals}} = 8000$ (default).
 
 \paragraph{Excluded weeks and downgrade trigger.}
-Weeks with fewer than $N_{\text{strict,min}}$ strict feasible samples are flagged as \emph{Audit-Weak} and excluded from aggregate metrics (they appear as marked points only). \textbf{The goal is not to guarantee all weeks pass}, but to ensure the exclusion ratio $r_{\text{excl}} < 20\%$. Worst-case weeks (with accept rates near $0.008$) may be excluded; this is expected and disclosed. If $r_{\text{excl}} \ge 20\%$, all season-level conclusions are downgraded to ``exploratory.''
+Weeks with fewer than $N_{\text{strict,min}}$ strict feasible samples are flagged as \emph{Audit-Weak} and excluded from aggregate metrics (they appear as marked points only). \textbf{The goal is not to guarantee all weeks pass}; worst-case weeks (with accept rates near $0.008$) may be excluded, and this is expected and disclosed.
+
+We \textbf{pre-register} the following reporting rule: if $r_{\text{excl}} \ge 20\%$, all season-level conclusions are downgraded to ``exploratory.'' We do \emph{not} tune parameters to minimize $r_{\text{excl}}$; the 20\% threshold and all audit parameters are fixed \emph{a priori} and applied uniformly.
 
 \subsection{Identifiability and Feasible Mass}
 \takeaway{Feasible mass and HDI width quantify how informative each week is.}
@@ -608,34 +610,35 @@ We include forward-chaining AUC results as a robustness check on covariate relev
 \end{figure}
 
 \section{Audit Parameter Specification Table}\label{app:audit-params}
-All parameters below are fixed as \emph{non-adjustable policy}; they are not tuned based on results.
+All parameters below are fixed \emph{a priori}; they are not tuned based on results.
 
 \begin{table}[H]
 \centering
 \caption{Fixed audit parameters (Block 5 specification).}
 \label{tab:audit-params}
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}llll@{}}
 \toprule
-Parameter & Value & Description \\
+Parameter & Value & Type & Description \\
 \midrule
-$\varepsilon_{\text{sum}}$ & $10^{-9}$ & Simplex sum tolerance \\
-$\varepsilon_{\text{ord}}$ & $10^{-6}$ & Elimination ordering tolerance \\
-$N_{\text{strict,min}}$ & 500 & Minimum strict feasible samples per week \\
-$q_{\text{gate}}$ & 0.10 & Quantile for budget calculation (fixed) \\
-$N_{\text{proposals}}$ & 8000 & Default proposal count (main results) \\
-$N_{\text{proposals,fast}}$ & 2000 & Fast mode for smoke tests only \\
-$r_{\text{excl,max}}$ & 20\% & Downgrade trigger threshold \\
+$\varepsilon_{\text{sum}}$ & $10^{-9}$ & Audit rule & Simplex sum tolerance \\
+$\varepsilon_{\text{ord}}$ & $10^{-6}$ & Audit rule & Elimination ordering tolerance \\
+$N_{\text{strict,min}}$ & 500 & Audit rule & Minimum strict feasible samples \\
+$q_{\text{gate}}$ & 0.10 & Audit rule & Quantile for budget calculation \\
+$r_{\text{excl,max}}$ & 20\% & Reporting rule & Downgrade trigger threshold \\
+$N_{\text{proposals}}$ & 8000 & Compute budget & Default proposal count (main) \\
+$N_{\text{proposals,fast}}$ & 2000 & Compute budget & Fast mode (smoke tests only) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \paragraph{Interpretation.}
 \begin{itemize}[nosep,leftmargin=2em]
+\item \textbf{Audit rules} define feasibility and output eligibility; they are not optimization targets.
+\item \textbf{Compute budget} affects Monte Carlo precision but is not a model assumption.
+\item \textbf{Reporting rule}: The 20\% threshold triggers downgrade, not parameter re-tuning.
 \item \textbf{Ties allowed}: Eliminated contestants may tie with survivors ($\max E = \min S$).
-\item \textbf{Strict checks}: Simplex + elimination constraints; rank/percent rule checks are diagnostic only.
-\item \textbf{Excluded weeks}: Flagged as Audit-Weak, shown as marked points, not used in aggregate statistics.
-\item \textbf{Downgrade rule}: If excluded ratio $\ge 20\%$, season-level conclusions become ``exploratory.''
-\item \textbf{Worst-case disclosure}: Weeks with accept rate $\approx 0.008$ may be excluded; this is expected and does not invalidate the audit.
+\item \textbf{Excluded weeks}: Flagged as Audit-Weak, shown as marked points, not in aggregates.
+\item \textbf{Worst-case disclosure}: Weeks with accept rate $\approx 0.008$ may be excluded; this is expected.
 \end{itemize}
 
 \clearpage
