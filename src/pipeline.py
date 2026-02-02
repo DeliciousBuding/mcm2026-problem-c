@@ -764,68 +764,167 @@ def parse_scales(env_val: str | None) -> List[int]:
 
 
 def update_benchmark_csv(records: List[Dict[str, float]]) -> pd.DataFrame:
-    """追加/更新规模实验记录，并按规模排序。"""
+    """追加/更新规模实验记录，按 (n_proposals, seed) 去重并排序。"""
     new_df = pd.DataFrame(records)
     if BENCHMARK_CSV.exists():
         old_df = pd.read_csv(BENCHMARK_CSV)
+        # 兼容旧格式（无 seed 列）
+        if "seed" not in old_df.columns:
+            old_df["seed"] = 20260131
         merged = pd.concat([old_df, new_df], ignore_index=True)
-        merged = merged.drop_duplicates(subset=["n_proposals"], keep="last")
+        merged = merged.drop_duplicates(subset=["n_proposals", "seed"], keep="last")
     else:
         merged = new_df
-    merged = merged.sort_values("n_proposals").reset_index(drop=True)
+    merged = merged.sort_values(["n_proposals", "seed"]).reset_index(drop=True)
     merged.to_csv(BENCHMARK_CSV, index=False, encoding="utf-8")
     return merged
 
 
 def plot_scale_benchmark(df: pd.DataFrame) -> None:
-    """绘制规模对比图（时间、误差、稳定性、匹配度）。"""
+    """绘制规模对比图（时间、误差、稳定性、匹配度），支持多 seed 误差带。"""
     if df.empty:
         return
-    fig, axes = plt.subplots(2, 2, figsize=(9.6, 7.2), dpi=600)
-    x = df["n_proposals"]
-    # elbow 计算（基于 mean_hdi 的边际收益）
-    if len(df) >= 3:
-        x_norm = (x - x.min()) / max(1e-9, (x.max() - x.min()))
-        y = df["mean_hdi"]
-        y_norm = (y - y.min()) / max(1e-9, (y.max() - y.min()))
-        p1 = np.array([x_norm.iloc[0], y_norm.iloc[0]])
-        p2 = np.array([x_norm.iloc[-1], y_norm.iloc[-1]])
-        dist = []
-        x1, y1 = float(p1[0]), float(p1[1])
-        x2, y2 = float(p2[0]), float(p2[1])
-        den = math.hypot(y2 - y1, x2 - x1)
-        for xi, yi in zip(x_norm, y_norm):
-            num = abs((y2 - y1) * xi - (x2 - x1) * yi + x2 * y1 - y2 * x1)
-            dist.append(num / max(1e-9, den))
-        elbow_idx = int(np.argmax(dist))
-        elbow_x = x.iloc[elbow_idx]
+    
+    # 检测是否有多 seed 数据
+    has_multi_seed = "seed" in df.columns and df.groupby("n_proposals")["seed"].nunique().max() > 1
+    
+    if has_multi_seed:
+        # 按 n_proposals 聚合：计算均值和标准差
+        agg_df = df.groupby("n_proposals").agg({
+            "runtime_sec": ["mean", "std"],
+            "mean_hdi": ["mean", "std"],
+            "stability_daws": ["mean", "std"],
+            "fairness_daws": ["mean", "std"],
+        }).reset_index()
+        agg_df.columns = ["n_proposals", 
+                         "runtime_mean", "runtime_std",
+                         "hdi_mean", "hdi_std",
+                         "stability_mean", "stability_std",
+                         "fairness_mean", "fairness_std"]
+        agg_df = agg_df.fillna(0)  # std=NaN when single sample
+        x = agg_df["n_proposals"]
+        
+        # elbow 计算（基于 mean_hdi 均值）
+        if len(agg_df) >= 3:
+            y = agg_df["hdi_mean"]
+            x_norm = (x - x.min()) / max(1e-9, (x.max() - x.min()))
+            y_norm = (y - y.min()) / max(1e-9, (y.max() - y.min()))
+            p1 = np.array([x_norm.iloc[0], y_norm.iloc[0]])
+            p2 = np.array([x_norm.iloc[-1], y_norm.iloc[-1]])
+            x1, y1 = float(p1[0]), float(p1[1])
+            x2, y2 = float(p2[0]), float(p2[1])
+            den = math.hypot(y2 - y1, x2 - x1)
+            dist = []
+            for xi, yi in zip(x_norm, y_norm):
+                num = abs((y2 - y1) * xi - (x2 - x1) * yi + x2 * y1 - y2 * x1)
+                dist.append(num / max(1e-9, den))
+            elbow_idx = int(np.argmax(dist))
+            elbow_x = x.iloc[elbow_idx]
+            elbow_range = f"{int(x.iloc[max(0, elbow_idx-1)])}–{int(x.iloc[min(len(x)-1, elbow_idx+1)])}"
+        else:
+            elbow_x = None
+            elbow_range = None
+
+        fig, axes = plt.subplots(2, 2, figsize=(9.6, 7.2), dpi=600)
+        
+        # Runtime with error band
+        ax = axes[0, 0]
+        ax.plot(x, agg_df["runtime_mean"], marker="o", color=COLOR_PRIMARY, label="Mean")
+        ax.fill_between(x, 
+                        agg_df["runtime_mean"] - agg_df["runtime_std"],
+                        agg_df["runtime_mean"] + agg_df["runtime_std"],
+                        alpha=0.25, color=COLOR_PRIMARY)
+        ax.set_title("Runtime vs Scale")
+        ax.set_xlabel("N_PROPOSALS")
+        ax.set_ylabel("Seconds")
+        
+        # Mean HDI with error band
+        ax = axes[0, 1]
+        ax.plot(x, agg_df["hdi_mean"], marker="o", color=COLOR_ACCENT, label="Mean")
+        ax.fill_between(x,
+                        agg_df["hdi_mean"] - agg_df["hdi_std"],
+                        agg_df["hdi_mean"] + agg_df["hdi_std"],
+                        alpha=0.25, color=COLOR_ACCENT)
+        ax.set_title("Error (Mean HDI) vs Scale")
+        ax.set_xlabel("N_PROPOSALS")
+        ax.set_ylabel("Mean HDI")
+        
+        # Stability with error band
+        ax = axes[1, 0]
+        ax.plot(x, agg_df["stability_mean"], marker="o", color=COLOR_PRIMARY_DARK, label="Mean")
+        ax.fill_between(x,
+                        agg_df["stability_mean"] - agg_df["stability_std"],
+                        agg_df["stability_mean"] + agg_df["stability_std"],
+                        alpha=0.25, color=COLOR_PRIMARY_DARK)
+        ax.set_title("Stability (DAWS) vs Scale")
+        ax.set_xlabel("N_PROPOSALS")
+        ax.set_ylabel("Stability")
+        
+        # Fairness with error band
+        ax = axes[1, 1]
+        ax.plot(x, agg_df["fairness_mean"], marker="o", color=COLOR_GRAY, label="Mean")
+        ax.fill_between(x,
+                        agg_df["fairness_mean"] - agg_df["fairness_std"],
+                        agg_df["fairness_mean"] + agg_df["fairness_std"],
+                        alpha=0.25, color=COLOR_GRAY)
+        ax.set_title("Conflict index (Kendall tau) vs Scale")
+        ax.set_xlabel("N_PROPOSALS")
+        ax.set_ylabel("Tau")
+        
+        if elbow_x is not None:
+            for ax in axes.flatten():
+                ax.axvline(elbow_x, color=COLOR_WARNING, linestyle="--", linewidth=1.0)
+            n_seeds = df.groupby("n_proposals")["seed"].nunique().max()
+            axes[0, 1].text(elbow_x, axes[0, 1].get_ylim()[1] * 0.92,
+                           f"Elbow ({n_seeds} seeds)", ha="center", color=COLOR_WARNING, fontsize=8)
     else:
-        elbow_x = None
+        # 单 seed 模式（原逻辑）
+        fig, axes = plt.subplots(2, 2, figsize=(9.6, 7.2), dpi=600)
+        x = df["n_proposals"]
+        
+        # elbow 计算（基于 mean_hdi 的边际收益）
+        if len(df) >= 3:
+            x_norm = (x - x.min()) / max(1e-9, (x.max() - x.min()))
+            y = df["mean_hdi"]
+            y_norm = (y - y.min()) / max(1e-9, (y.max() - y.min()))
+            p1 = np.array([x_norm.iloc[0], y_norm.iloc[0]])
+            p2 = np.array([x_norm.iloc[-1], y_norm.iloc[-1]])
+            x1, y1 = float(p1[0]), float(p1[1])
+            x2, y2 = float(p2[0]), float(p2[1])
+            den = math.hypot(y2 - y1, x2 - x1)
+            dist = []
+            for xi, yi in zip(x_norm, y_norm):
+                num = abs((y2 - y1) * xi - (x2 - x1) * yi + x2 * y1 - y2 * x1)
+                dist.append(num / max(1e-9, den))
+            elbow_idx = int(np.argmax(dist))
+            elbow_x = x.iloc[elbow_idx]
+        else:
+            elbow_x = None
 
-    axes[0, 0].plot(x, df["runtime_sec"], marker="o", color=COLOR_PRIMARY)
-    axes[0, 0].set_title("Runtime vs Scale")
-    axes[0, 0].set_xlabel("N_PROPOSALS")
-    axes[0, 0].set_ylabel("Seconds")
+        axes[0, 0].plot(x, df["runtime_sec"], marker="o", color=COLOR_PRIMARY)
+        axes[0, 0].set_title("Runtime vs Scale")
+        axes[0, 0].set_xlabel("N_PROPOSALS")
+        axes[0, 0].set_ylabel("Seconds")
 
-    axes[0, 1].plot(x, df["mean_hdi"], marker="o", color=COLOR_ACCENT)
-    axes[0, 1].set_title("Error (Mean HDI) vs Scale")
-    axes[0, 1].set_xlabel("N_PROPOSALS")
-    axes[0, 1].set_ylabel("Mean HDI")
+        axes[0, 1].plot(x, df["mean_hdi"], marker="o", color=COLOR_ACCENT)
+        axes[0, 1].set_title("Error (Mean HDI) vs Scale")
+        axes[0, 1].set_xlabel("N_PROPOSALS")
+        axes[0, 1].set_ylabel("Mean HDI")
 
-    axes[1, 0].plot(x, df["stability_daws"], marker="o", color=COLOR_PRIMARY_DARK)
-    axes[1, 0].set_title("Stability (DAWS) vs Scale")
-    axes[1, 0].set_xlabel("N_PROPOSALS")
-    axes[1, 0].set_ylabel("Stability")
+        axes[1, 0].plot(x, df["stability_daws"], marker="o", color=COLOR_PRIMARY_DARK)
+        axes[1, 0].set_title("Stability (DAWS) vs Scale")
+        axes[1, 0].set_xlabel("N_PROPOSALS")
+        axes[1, 0].set_ylabel("Stability")
 
-    axes[1, 1].plot(x, df["fairness_daws"], marker="o", color=COLOR_GRAY)
-    axes[1, 1].set_title("Conflict index (Kendall tau) vs Scale")
-    axes[1, 1].set_xlabel("N_PROPOSALS")
-    axes[1, 1].set_ylabel("Tau")
+        axes[1, 1].plot(x, df["fairness_daws"], marker="o", color=COLOR_GRAY)
+        axes[1, 1].set_title("Conflict index (Kendall tau) vs Scale")
+        axes[1, 1].set_xlabel("N_PROPOSALS")
+        axes[1, 1].set_ylabel("Tau")
 
-    if elbow_x is not None:
-        for ax in axes.flatten():
-            ax.axvline(elbow_x, color=COLOR_WARNING, linestyle="--", linewidth=1.0)
-        axes[0, 1].text(elbow_x, axes[0, 1].get_ylim()[1] * 0.92, "Elbow", ha="center", color=COLOR_WARNING, fontsize=8)
+        if elbow_x is not None:
+            for ax in axes.flatten():
+                ax.axvline(elbow_x, color=COLOR_WARNING, linestyle="--", linewidth=1.0)
+            axes[0, 1].text(elbow_x, axes[0, 1].get_ylim()[1] * 0.92, "Elbow", ha="center", color=COLOR_WARNING, fontsize=8)
 
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_scale_benchmark.pdf", dpi=600)
@@ -1338,12 +1437,13 @@ def mechanism_judge_save(v: np.ndarray, week_df: pd.DataFrame, beta: float) -> L
 # 主流程
 # =========================
 
-def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, save_outputs: bool = True) -> Dict[str, float]:
+def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, save_outputs: bool = True, seed: int | None = None) -> Dict[str, float]:
     ensure_dirs()
     set_plot_style()
     LOG_PATH.write_text("", encoding="utf-8")
     t_start = time.perf_counter()
     n_props = int(n_props or N_PROPOSALS)
+    base_seed = seed if seed is not None else 20260131
 
     log("Load data...")
     df = load_data()
@@ -1360,7 +1460,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     # 存储后验结果
     posterior_records = []
     week_metrics = []
-    season_week_groups = long_df.groupby(["season", "week"], sort=True)
+    season_week_groups = list(long_df.groupby(["season", "week"], sort=True))  # 转为 list 以支持多次迭代
     # 样本缓存，避免重复采样
     samples_cache: Dict[Tuple[int, int], np.ndarray] = {}
     acc_cache: Dict[Tuple[int, int], float] = {}
@@ -1383,8 +1483,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         tasks = []
         for season, sdf in long_df.groupby("season", sort=True):
             season_df = sdf[cols].copy()
-            seed = 20260131 + int(season) * 1000
-            tasks.append((int(season), season_df, ALPHA_PERCENT, EPSILON, n_props, COMPUTE_BOUNDS, seed))
+            task_seed = base_seed + int(season) * 1000
+            tasks.append((int(season), season_df, ALPHA_PERCENT, EPSILON, n_props, COMPUTE_BOUNDS, task_seed))
 
         log(f"Parallel sampling by season... tasks={len(tasks)}")
         with ProcessPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
@@ -3325,6 +3425,14 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         "max_hdi_width": max_hdi,
         "flip_rate": flip_rate,
         "daws_improve": daws_improve,
+        # --- 三机制完整指标 ---
+        "percent_agency": stats_percent["agency"],
+        "percent_stability": stats_percent["stability"],
+        "percent_integrity": stats_percent["judge_integrity"],
+        "rank_agency": stats_rank["agency"],
+        "rank_stability": stats_rank["stability"],
+        "rank_integrity": stats_rank["judge_integrity"],
+        "daws_agency": stats_daws["agency"],
         "stability_daws": stats_daws["stability"],
         "integrity_daws": stats_daws["judge_integrity"],
         "fairness_daws": stats_daws["fairness"],
@@ -3376,9 +3484,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     summary["runtime_sec"] = float(elapsed)
     summary["n_proposals"] = int(n_props)
+    summary["seed"] = int(base_seed)
     if record_benchmark:
         bench_df = update_benchmark_csv([{
             "n_proposals": summary["n_proposals"],
+            "seed": summary["seed"],
             "runtime_sec": summary["runtime_sec"],
             "mean_hdi": summary["mean_hdi_width"],
             "max_hdi": summary["max_hdi_width"],
@@ -3542,17 +3652,26 @@ if __name__ == "__main__":
             run_parameter_grid_search()
 
         scales = parse_scales(os.getenv("MCM_SCALES"))
+        # 多 seed 支持：MCM_SEEDS 环境变量（逗号分隔）
+        seeds_str = os.getenv("MCM_SEEDS", "")
+        seeds = [int(s.strip()) for s in seeds_str.split(",") if s.strip().isdigit()] if seeds_str else [20260131]
+        
         if scales:
             results = []
             max_scale = max(scales)
+            total_runs = len(scales) * len(seeds)
+            run_idx = 0
             for scale in scales:
-                log(f"Running scale experiment: {scale}")
-                summary = run_pipeline(n_props=scale, record_benchmark=True, save_outputs=(scale == max_scale))
-                results.append(summary)
+                for seed in seeds:
+                    run_idx += 1
+                    log(f"Running scale experiment: scale={scale}, seed={seed} ({run_idx}/{total_runs})")
+                    is_last = (scale == max_scale and seed == seeds[-1])
+                    summary = run_pipeline(n_props=scale, record_benchmark=True, save_outputs=is_last, seed=seed)
+                    results.append(summary)
             if (FIG_DIR / "fig_scale_benchmark.pdf").exists():
                 log("Scale benchmark figure updated.")
         else:
-            run_pipeline(n_props=N_PROPOSALS, record_benchmark=True, save_outputs=True)
+            run_pipeline(n_props=N_PROPOSALS, record_benchmark=True, save_outputs=True, seed=seeds[0])
 
         if RUN_SYNTHETIC_VALIDATION:
             synthetic_data_validation()
