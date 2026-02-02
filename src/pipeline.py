@@ -1634,10 +1634,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.close()
 
     # Wrongful heatmap
-    plt.figure(figsize=(6.4, 3.8))
+    plt.figure(figsize=(6.6, 4.4))
+    cmap_wrongful = sns.light_palette("#6BAED6", as_cmap=True)
     ax = sns.heatmap(
         wrongful_heat,
-        cmap="cividis",
+        cmap=cmap_wrongful,
         cbar_kws={"label": "Wrongful prob"},
         vmin=0.0,
         vmax=1.0,
@@ -1645,8 +1646,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     )
     ax.set_xticks(np.arange(max_week) + 0.5)
     ax.set_xticklabels(np.arange(1, max_week + 1))
-    ax.set_yticks(np.arange(max_season) + 0.5)
-    ax.set_yticklabels(np.arange(1, max_season + 1))
+    season_idx = np.arange(max_season)
+    y_step = 2 if max_season > 20 else 1
+    y_ticks = season_idx[::y_step]
+    ax.set_yticks(y_ticks + 0.5)
+    ax.set_yticklabels(y_ticks + 1, fontsize=7)
     plt.xlabel("Week")
     plt.ylabel("Season")
     plt.title("Wrongful elimination probability by week\n(blank cells = no elimination or missing data)")
