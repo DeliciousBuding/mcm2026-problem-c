@@ -463,11 +463,33 @@ def evaluate_mechanisms(
     instability_s = np.mean(elim_s != elim_noise_s)
     instability_d = np.mean(elim_d != elim_noise_d)
 
+    conflict_count = int(np.sum(conflict_mask))
+    if conflict_count > 0:
+        agency_p_c = np.mean(fan_lowest[conflict_mask] == elim_p[conflict_mask])
+        agency_r_c = np.mean(fan_lowest[conflict_mask] == elim_r[conflict_mask])
+        agency_d_c = np.mean(fan_lowest[conflict_mask] == elim_d[conflict_mask])
+
+        integrity_p_c = np.mean(elim_p[conflict_mask] == judge_lowest)
+        integrity_r_c = np.mean(elim_r[conflict_mask] == judge_lowest)
+        integrity_d_c = np.mean(elim_d[conflict_mask] == judge_lowest)
+
+        instability_p_c = np.mean(elim_p[conflict_mask] != elim_noise_p[conflict_mask])
+        instability_r_c = np.mean(elim_r[conflict_mask] != elim_noise_r[conflict_mask])
+        instability_d_c = np.mean(elim_d[conflict_mask] != elim_noise_d[conflict_mask])
+    else:
+        agency_p_c = agency_r_c = agency_d_c = 0.0
+        integrity_p_c = integrity_r_c = integrity_d_c = 0.0
+        instability_p_c = instability_r_c = instability_d_c = 0.0
+
     return {
         "percent": {"fairness": tau_mean, "agency": agency_p, "instability": instability_p, "judge_integrity": integrity_p},
         "rank": {"fairness": tau_mean, "agency": agency_r, "instability": instability_r, "judge_integrity": integrity_r},
         "save": {"fairness": tau_mean, "agency": agency_s, "instability": instability_s, "judge_integrity": integrity_s},
         "daws": {"fairness": tau_mean, "agency": agency_d, "instability": instability_d, "judge_integrity": integrity_d},
+        "percent_conflict": {"agency": agency_p_c, "instability": instability_p_c, "judge_integrity": integrity_p_c},
+        "rank_conflict": {"agency": agency_r_c, "instability": instability_r_c, "judge_integrity": integrity_r_c},
+        "daws_conflict": {"agency": agency_d_c, "instability": instability_d_c, "judge_integrity": integrity_d_c},
+        "conflict_count": conflict_count,
         "flip_sum": float(np.sum(conflict_mask)),
         "count": m,
     }
@@ -1288,6 +1310,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         "save": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
         "daws": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
     }
+    metrics_conflict = {
+        "percent": {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+        "rank": {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+        "daws": {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+    }
     flip_sum = 0.0
     flip_count = 0
 
@@ -1327,6 +1354,15 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             metrics[key]["judge_integrity_sum"] += eval_res[key]["judge_integrity"] * m
             metrics[key]["count"] += m
 
+        conflict_count = eval_res.get("conflict_count", 0)
+        if conflict_count:
+            for key in ["percent", "rank", "daws"]:
+                c_key = f"{key}_conflict"
+                metrics_conflict[key]["agency_sum"] += eval_res[c_key]["agency"] * conflict_count
+                metrics_conflict[key]["instability_sum"] += eval_res[c_key]["instability"] * conflict_count
+                metrics_conflict[key]["judge_integrity_sum"] += eval_res[c_key]["judge_integrity"] * conflict_count
+                metrics_conflict[key]["count"] += conflict_count
+
         # 收集季节级指标
         season_metrics_list.append({
             "season": int(season),
@@ -1359,9 +1395,24 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "judge_integrity": float(judge_integrity),
         }
 
+    def agg_conflict(d: Dict[str, float]) -> Dict[str, float]:
+        if d["count"] == 0:
+            return {"agency": float("nan"), "stability": float("nan"), "judge_integrity": float("nan")}
+        agency = d["agency_sum"] / d["count"]
+        stability = 1.0 - (d["instability_sum"] / d["count"])
+        judge_integrity = d["judge_integrity_sum"] / d["count"]
+        return {
+            "agency": float(agency),
+            "stability": float(stability),
+            "judge_integrity": float(judge_integrity),
+        }
+
     stats_percent = agg_stats(metrics["percent"])
     stats_rank = agg_stats(metrics["rank"])
     stats_daws = agg_stats(metrics["daws"])
+    stats_percent_conf = agg_conflict(metrics_conflict["percent"])
+    stats_rank_conf = agg_conflict(metrics_conflict["rank"])
+    stats_daws_conf = agg_conflict(metrics_conflict["daws"])
     flip_rate = float(flip_sum / flip_count) if flip_count else float("nan")
     log(f"Flip rate (percent vs rank): {flip_rate:.3f}")
 
@@ -1794,7 +1845,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     render_dashboard_concept()
 
     # Mechanism radar
-    def radar_plot(stats_dict: Dict[str, Dict[str, float]], labels: List[str], fname: str) -> None:
+    def radar_plot(stats_dict: Dict[str, Dict[str, float]], labels: List[str], fname: str, title: str) -> None:
         categories = ["agency", "judge_integrity", "stability"]
         tick_labels = ["Agency", "Integrity", "Stability"]
         angles = np.linspace(0, 2 * math.pi, len(categories), endpoint=False).tolist()
@@ -1807,7 +1858,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             ax.plot(angles, values, label=label)
             ax.fill(angles, values, alpha=0.10)
         ax.set_thetagrids(np.degrees(angles[:-1]), tick_labels)
-        ax.set_title("Mechanism trade-offs")
+        ax.set_title(title)
         ax.legend(loc="upper right", bbox_to_anchor=(1.15, 1.05))
         fig.savefig(FIG_DIR / fname)
         plt.close(fig)
@@ -1816,6 +1867,14 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         {"Percent": stats_percent, "Rank": stats_rank, "DAWS": stats_daws},
         ["Percent", "Rank", "DAWS"],
         "fig_mechanism_radar.pdf",
+        "Mechanism trade-offs",
+    )
+
+    radar_plot(
+        {"Percent": stats_percent_conf, "Rank": stats_rank_conf, "DAWS": stats_daws_conf},
+        ["Percent", "Rank", "DAWS"],
+        "fig_mechanism_radar_conflict.pdf",
+        "Mechanism trade-offs (conflict weeks)",
     )
 
     # Mechanism compare (bar)
@@ -1836,6 +1895,26 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.legend(frameon=False, fontsize=8)
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_mechanism_compare.pdf")
+    plt.close()
+
+    # Mechanism compare (bar) - conflict weeks only
+    labels = ["Agency", "Integrity", "Stability"]
+    percent_vals = [stats_percent_conf["agency"], stats_percent_conf["judge_integrity"], stats_percent_conf["stability"]]
+    rank_vals = [stats_rank_conf["agency"], stats_rank_conf["judge_integrity"], stats_rank_conf["stability"]]
+    daws_vals = [stats_daws_conf["agency"], stats_daws_conf["judge_integrity"], stats_daws_conf["stability"]]
+    x = np.arange(len(labels))
+    width = 0.24
+    plt.figure(figsize=(6.2, 3.6))
+    plt.bar(x - width, percent_vals, width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
+    plt.bar(x, rank_vals, width, label="Rank", color=COLOR_GRAY, alpha=0.85)
+    plt.bar(x + width, daws_vals, width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
+    plt.xticks(x, labels)
+    plt.ylim(0, 1)
+    plt.ylabel("Score")
+    plt.title("Mechanism comparison (conflict weeks)")
+    plt.legend(frameon=False, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_mechanism_compare_conflict.pdf")
     plt.close()
 
     # Pareto-like trade-off (2D)
