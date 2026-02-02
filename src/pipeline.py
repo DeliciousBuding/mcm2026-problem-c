@@ -1437,13 +1437,21 @@ def mechanism_judge_save(v: np.ndarray, week_df: pd.DataFrame, beta: float) -> L
 # 主流程
 # =========================
 
-def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, save_outputs: bool = True, seed: int | None = None) -> Dict[str, float]:
+def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, save_outputs: bool = True, seed: int | None = None, skip_render: bool = False) -> Dict[str, float]:
+    """Run the full analysis pipeline.
+    
+    Args:
+        skip_render: If True, skip all figure rendering (for scale benchmark batch runs).
+                     Can also be set via MCM_SKIP_RENDER=1 environment variable.
+    """
     ensure_dirs()
     set_plot_style()
     LOG_PATH.write_text("", encoding="utf-8")
     t_start = time.perf_counter()
     n_props = int(n_props or N_PROPOSALS)
     base_seed = seed if seed is not None else 20260131
+    # 环境变量覆盖 skip_render
+    skip_render = skip_render or os.getenv("MCM_SKIP_RENDER", "").strip() in ("1", "true", "True")
 
     log("Load data...")
     df = load_data()
@@ -2511,899 +2519,903 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     # =========================
     # 图表输出
     # =========================
-    log("Rendering figures...")
-
-    # Uncertainty heatmap
-    plt.figure(figsize=(6.6, 4.4))
-    cmap_uncertainty = sns.light_palette("#6BAED6", as_cmap=True)
-    ax = sns.heatmap(
-        heat,
-        cmap=cmap_uncertainty,
-        cbar_kws={"label": "Mean HDI width"},
-        mask=np.isnan(heat),
-    )
-    ax.set_xticks(np.arange(max_week) + 0.5)
-    ax.set_xticklabels(np.arange(1, max_week + 1))
-    season_idx = np.arange(max_season)
-    y_step = 2 if max_season > 20 else 1
-    y_ticks = season_idx[::y_step]
-    ax.set_yticks(y_ticks + 0.5)
-    ax.set_yticklabels(y_ticks + 1, fontsize=7)
-    plt.xlabel("Week")
-    plt.ylabel("Season")
-    plt.title("Uncertainty concentrates in a small set of weeks\n(blank cells = no elimination or missing data)")
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_uncertainty_heatmap.pdf")
-    plt.close()
-
-    # Wrongful heatmap
-    plt.figure(figsize=(6.6, 4.4))
-    cmap_wrongful = sns.light_palette("#6BAED6", as_cmap=True)
-    ax = sns.heatmap(
-        wrongful_heat,
-        cmap=cmap_wrongful,
-        cbar_kws={"label": "Wrongful prob"},
-        vmin=0.0,
-        vmax=1.0,
-        mask=np.isnan(wrongful_heat),
-    )
-    ax.set_xticks(np.arange(max_week) + 0.5)
-    ax.set_xticklabels(np.arange(1, max_week + 1))
-    season_idx = np.arange(max_season)
-    y_step = 2 if max_season > 20 else 1
-    y_ticks = season_idx[::y_step]
-    ax.set_yticks(y_ticks + 0.5)
-    ax.set_yticklabels(y_ticks + 1, fontsize=7)
-    plt.xlabel("Week")
-    plt.ylabel("Season")
-    plt.title("Wrongful elimination probability by week\n(blank cells = no elimination or missing data)")
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_wrongful_heatmap.pdf")
-    plt.close()
-
-    # Conflict map
-    cm_df = posterior_df.copy()
-    plt.figure(figsize=(5.8, 4.2))
-    sizes = 200 * cm_df["hdi_width"].clip(0, cm_df["hdi_width"].quantile(0.95))
-    colors = cm_df["is_eliminated_week"].map(lambda x: COLOR_WARNING if x else COLOR_PRIMARY)
-    plt.scatter(cm_df["judge_share"], cm_df["fan_share_mean"], s=sizes, c=colors, alpha=0.75, edgecolors="none")
-    legend_handles = [
-        plt.Line2D([0], [0], marker="o", color="w", label="Eliminated week", markerfacecolor=COLOR_WARNING, markersize=6),
-        plt.Line2D([0], [0], marker="o", color="w", label="Not eliminated", markerfacecolor=COLOR_PRIMARY, markersize=6),
-        plt.Line2D([0], [0], marker="o", color="w", label="HDI width (size)", markerfacecolor=COLOR_GRAY, markersize=8),
-    ]
-    plt.xlabel("Judge share")
-    plt.ylabel("Fan share (posterior mean)")
-    plt.title("Elimination is not always aligned with minimum fan support")
-    plt.legend(handles=legend_handles, frameon=False, fontsize=8, loc="lower right")
-    plt.savefig(FIG_DIR / "fig_conflict_map.pdf")
-    plt.close()
-
-    # Conflict combo: HDI size + wrongful标注
-    combo_df = cm_df.copy()
-    combo_df["wrongful"] = False
-    for (season, week), sub in combo_df.groupby(["season", "week"], sort=False):
-        if sub.empty:
-            continue
-        min_fan = sub["fan_share_mean"].min()
-        wrongful_mask = (sub["is_eliminated_week"]) & (sub["fan_share_mean"] > min_fan + 1e-6)
-        combo_df.loc[wrongful_mask.index, "wrongful"] = wrongful_mask
-    plt.figure(figsize=(5.8, 4.2))
-    sizes = 220 * combo_df["hdi_width"].clip(0, combo_df["hdi_width"].quantile(0.95))
-    colors = combo_df["is_eliminated_week"].map(lambda x: COLOR_WARNING if x else COLOR_PRIMARY)
-    plt.scatter(combo_df["judge_share"], combo_df["fan_share_mean"], s=sizes, c=colors, alpha=0.70, edgecolors="none")
-    wrongful_pts = combo_df[combo_df["wrongful"]]
-    legend_handles = [
-        plt.Line2D([0], [0], marker="o", color="w", label="Eliminated week", markerfacecolor=COLOR_WARNING, markersize=6),
-        plt.Line2D([0], [0], marker="o", color="w", label="Not eliminated", markerfacecolor=COLOR_PRIMARY, markersize=6),
-        plt.Line2D([0], [0], marker="o", color="w", label="HDI width (size)", markerfacecolor=COLOR_GRAY, markersize=8),
-    ]
-    if not wrongful_pts.empty:
-        plt.scatter(
-            wrongful_pts["judge_share"],
-            wrongful_pts["fan_share_mean"],
-            s=120,
-            facecolors="none",
-            edgecolors=COLOR_PRIMARY_DARK,
-            linewidths=1.2,
-            label="Wrongful elimination",
-        )
-    plt.xlabel("Judge share")
-    plt.ylabel("Fan share (posterior mean)")
-    plt.title("Conflict + uncertainty + wrongful eliminations")
-    if not wrongful_pts.empty:
-        legend_handles.append(
-            plt.Line2D([0], [0], marker="o", color=COLOR_PRIMARY_DARK, label="Wrongful elimination", markerfacecolor="none", markersize=7),
-        )
-    plt.legend(handles=legend_handles, loc="lower right", frameon=False, fontsize=8)
-    plt.savefig(FIG_DIR / "fig_conflict_combo.pdf")
-    plt.close()
-
-    # ========== Hard-4 声明：Sigma sensitivity 仅为后处理/可视化 ==========
-    # gaussian_filter1d 仅用于绘图/敏感性探索，不进入：
-    #   - 可行性判定 (strict_feasible_mask)
-    #   - 采样过滤 (sample_week_percent)
-    #   - 机制指标计算 (evaluate_mechanisms)
-    # 此图应在论文中标注为 "exploratory post-processing" 而非 "temporal prior"
-    sigma_vals = []
-    sigma_widths = []
-    for sigma in SIGMA_LIST:
-        # 简化：对周均宽度进行高斯平滑（仅用于可视化敏感性，不影响主结论）
-        smoothed = gaussian_filter1d(np.nan_to_num(week_metrics_df["mean_hdi_width"], nan=np.nanmean(week_metrics_df["mean_hdi_width"])), sigma)
-        sigma_vals.append(sigma)
-        sigma_widths.append(float(np.mean(smoothed)))
-    plt.figure(figsize=(5.6, 3.6))
-    plt.plot(sigma_vals, sigma_widths, marker="o", color=COLOR_PRIMARY)
-    plt.xlabel("Sigma")
-    plt.ylabel("Average HDI width")
-    plt.title("Sensitivity of HDI width to sigma")
-    plt.savefig(FIG_DIR / "fig_sigma_sensitivity.pdf")
-    plt.close()
-
-    # Rule switch
-    plt.figure(figsize=(5.8, 3.6))
-    plt.plot(evidence_df["season"], evidence_df["prob_rank"], color=COLOR_PRIMARY, marker="o")
-    plt.axvline(28, color=COLOR_GRAY, linestyle="--", linewidth=1.0)
-    plt.xlabel("Season")
-    plt.ylabel("P(rank+save)")
-    plt.title("Inferred rule switch probability")
-    plt.savefig(FIG_DIR / "fig_rule_switch.pdf")
-    plt.close()
-
-    # DAWS trigger schedule
-    log("Rendering DAWS trigger schedule...")
-    week_u = week_metrics_df.groupby("week")["mean_hdi_width"].mean().reset_index()
-    if "audit_weak" in week_metrics_df.columns:
-        audit_week = week_metrics_df.groupby("week")["audit_weak"].mean().reset_index()
-        week_u = week_u.merge(audit_week, on="week", how="left")
-        week_u["audit_weak"] = week_u["audit_weak"].fillna(0.0) > 0
+    if skip_render:
+        log("Skipping figure rendering (skip_render=True)...")
+        # Jump directly to metrics output section
     else:
-        week_u["audit_weak"] = False
-    if not week_u.empty:
-        week_u = week_u.sort_values("week")
-        max_week_all = int(week_u["week"].max())
-        tier_map = {"Green": 1, "Yellow": 2, "Red": 3}
-        tiers = []
-        for _, row in week_u.iterrows():
-            mean_width = float(row["mean_hdi_width"])
-            if np.isnan(mean_width):
-                mean_width = 0.0
-            tier_label, _ = determine_daws_tier(mean_width, int(row["week"]), max_week_all, u_p90, u_p97)
-            tiers.append(tier_map[tier_label])
-        fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.6), sharex=True)
-        axes[0].plot(week_u["week"], week_u["mean_hdi_width"], marker="o", color=COLOR_PRIMARY, label="U_t (monitoring)")
-        if week_u["audit_weak"].any():
-            axes[0].scatter(
-                week_u.loc[week_u["audit_weak"], "week"],
-                week_u.loc[week_u["audit_weak"], "mean_hdi_width"],
-                marker="x",
-                color=COLOR_WARNING,
-                s=45,
-                label="Audit-Weak flagged",
-            )
-        axes[0].axhline(u_p90, color=COLOR_ACCENT, linestyle="--", linewidth=1.0, label=f"P{int(DAWS_U_P90 * 100)} threshold")
-        axes[0].axhline(u_p97, color=COLOR_WARNING, linestyle="--", linewidth=1.0, label=f"P{int(DAWS_U_P97 * 100)} threshold")
-        axes[0].set_ylabel("U_t (mean HDI width)")
-        axes[0].set_title("Monitoring signal U_t (audit + disclosure)")
-        axes[0].legend(frameon=False, fontsize=8, loc="upper right")
+        log("Rendering figures...")
 
-        axes[1].step(week_u["week"], tiers, where="mid", color=COLOR_PRIMARY_DARK, linewidth=1.6)
-        axes[1].set_ylabel("Tier")
-        axes[1].set_xlabel("Week")
-        axes[1].set_ylim(0.7, 3.3)
-        axes[1].set_yticks([1, 2, 3])
-        axes[1].set_yticklabels(["Green", "Yellow", "Red"])
+        # Uncertainty heatmap
+        plt.figure(figsize=(6.6, 4.4))
+        cmap_uncertainty = sns.light_palette("#6BAED6", as_cmap=True)
+        ax = sns.heatmap(
+            heat,
+            cmap=cmap_uncertainty,
+            cbar_kws={"label": "Mean HDI width"},
+            mask=np.isnan(heat),
+        )
+        ax.set_xticks(np.arange(max_week) + 0.5)
+        ax.set_xticklabels(np.arange(1, max_week + 1))
+        season_idx = np.arange(max_season)
+        y_step = 2 if max_season > 20 else 1
+        y_ticks = season_idx[::y_step]
+        ax.set_yticks(y_ticks + 0.5)
+        ax.set_yticklabels(y_ticks + 1, fontsize=7)
+        plt.xlabel("Week")
+        plt.ylabel("Season")
+        plt.title("Uncertainty concentrates in a small set of weeks\n(blank cells = no elimination or missing data)")
         plt.tight_layout()
-        plt.savefig(FIG_DIR / "fig_daws_trigger.pdf")
-        plt.close(fig)
-
-    # Dashboard 概念图
-    log("Rendering dashboard concept...")
-    render_dashboard_concept()
-
-    # Mechanism radar
-    def radar_plot(
-        stats_dict: Dict[str, Dict[str, float]],
-        labels: List[str],
-        fname: str,
-        title: str,
-        tick_labels: List[str] | None = None,
-    ) -> None:
-        categories = ["agency", "judge_integrity", "stability"]
-        if tick_labels is None:
-            tick_labels = ["Agency", "Integrity", "Stability"]
-        angles = np.linspace(0, 2 * math.pi, len(categories), endpoint=False).tolist()
-        angles += angles[:1]
-        fig = plt.figure(figsize=(4.8, 4.2))
-        ax = plt.subplot(111, polar=True)
-        for label in labels:
-            values = [stats_dict[label][c] for c in categories]
-            values += values[:1]
-            ax.plot(angles, values, label=label)
-            ax.fill(angles, values, alpha=0.10)
-        ax.set_thetagrids(np.degrees(angles[:-1]), tick_labels)
-        ax.set_title(title)
-        ax.legend(loc="upper right", bbox_to_anchor=(1.15, 1.05))
-        fig.savefig(FIG_DIR / fname)
-        plt.close(fig)
-
-    radar_plot(
-        {"Percent": stats_percent, "Rank": stats_rank, "DAWS": stats_daws},
-        ["Percent", "Rank", "DAWS"],
-        "fig_mechanism_radar.pdf",
-        "Mechanism trade-offs",
-    )
-
-    radar_plot(
-        {"Percent": stats_percent_conf, "Rank": stats_rank_conf, "DAWS": stats_daws_conf},
-        ["Percent", "Rank", "DAWS"],
-        "fig_mechanism_radar_conflict.pdf",
-        "Mechanism trade-offs (conflict weeks)",
-        tick_labels=["Agency (Pct align)", "Integrity", "Stability"],
-    )
-
-    # Mechanism compare (bar)
-    labels = ["Agency", "Integrity", "Stability"]
-    percent_vals = [stats_percent["agency"], stats_percent["judge_integrity"], stats_percent["stability"]]
-    rank_vals = [stats_rank["agency"], stats_rank["judge_integrity"], stats_rank["stability"]]
-    daws_vals = [stats_daws["agency"], stats_daws["judge_integrity"], stats_daws["stability"]]
-    x = np.arange(len(labels))
-    width = 0.24
-    plt.figure(figsize=(6.2, 3.6))
-    plt.bar(x - width, percent_vals, width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
-    plt.bar(x, rank_vals, width, label="Rank", color=COLOR_GRAY, alpha=0.85)
-    plt.bar(x + width, daws_vals, width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
-    plt.xticks(x, labels)
-    plt.ylim(0, 1)
-    plt.ylabel("Score")
-    plt.title("Mechanism comparison (numeric)")
-    plt.legend(frameon=False, fontsize=8)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_mechanism_compare.pdf")
-    plt.close()
-
-    # Mechanism compare (bar) - conflict weeks only
-    labels = ["Agency (pct align)", "Integrity", "Stability"]
-    percent_vals = [stats_percent_conf["agency"], stats_percent_conf["judge_integrity"], stats_percent_conf["stability"]]
-    rank_vals = [stats_rank_conf["agency"], stats_rank_conf["judge_integrity"], stats_rank_conf["stability"]]
-    daws_vals = [stats_daws_conf["agency"], stats_daws_conf["judge_integrity"], stats_daws_conf["stability"]]
-    x = np.arange(len(labels))
-    width = 0.24
-    plt.figure(figsize=(6.2, 3.6))
-    plt.bar(x - width, percent_vals, width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
-    plt.bar(x, rank_vals, width, label="Rank", color=COLOR_GRAY, alpha=0.85)
-    plt.bar(x + width, daws_vals, width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
-    plt.xticks(x, labels, fontsize=9)
-    plt.ylim(0, 1)
-    plt.ylabel("Score")
-    plt.title("Mechanism comparison (conflict weeks)")
-    plt.legend(frameon=False, fontsize=8)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_mechanism_compare_conflict.pdf")
-    plt.close()
-
-    # Pareto-like trade-off (2D)
-    def stats_for_alpha(alpha: float) -> Dict[str, float]:
-        totals = {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0}
-        for (season, week), wdf in season_week_groups:
-            active_df = wdf[wdf["active"]].copy()
-            if len(active_df) == 0:
-                continue
-            key = (int(season), int(week))
-            samples = samples_cache.get(key)
-            if samples is None or len(samples) == 0:
-                samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
-                samples_cache[key] = samples
-            if len(samples) == 0:
-                continue
-            res = evaluate_mechanisms(samples, active_df, alpha, "Green", EPSILON, RNG)
-            m = res["count"]
-            totals["agency_sum"] += res["daws"]["agency"] * m
-            totals["instability_sum"] += res["daws"]["instability"] * m
-            totals["judge_integrity_sum"] += res["daws"]["judge_integrity"] * m
-            totals["count"] += m
-        if totals["count"] == 0:
-            return {"agency": float("nan"), "stability": float("nan"), "judge_integrity": float("nan")}
-        agency = totals["agency_sum"] / totals["count"]
-        stability = 1.0 - (totals["instability_sum"] / totals["count"])
-        judge_integrity = totals["judge_integrity_sum"] / totals["count"]
-        return {"agency": float(agency), "stability": float(stability), "judge_integrity": float(judge_integrity)}
-
-    alpha_grid = np.linspace(0.05, 0.95, 10)
-    curve = [stats_for_alpha(a) for a in alpha_grid]
-    xs = [c["agency"] for c in curve]
-    ys = [c["stability"] for c in curve]
-    cs = [c["judge_integrity"] for c in curve]
-
-    plt.figure(figsize=(5.2, 4.2))
-    plt.plot(xs, ys, color=COLOR_GRAY, linewidth=1.1, alpha=0.6)
-    sc = plt.scatter(xs, ys, c=cs, cmap="cividis", s=25, zorder=2)
-    plt.scatter(stats_percent["agency"], stats_percent["stability"], color=COLOR_PRIMARY, s=55, marker="o", label="Percent")
-    plt.scatter(stats_rank["agency"], stats_rank["stability"], color=COLOR_GRAY, s=55, marker="s", label="Rank")
-    plt.scatter(stats_daws["agency"], stats_daws["stability"], color=COLOR_ACCENT, s=85, marker="*", label="DAWS")
-    plt.xlabel("Viewer agency")
-    plt.ylabel("Stability")
-    plt.ylim(0, 1)
-    plt.xlim(0, 1)
-    plt.title("Pareto trade-off: agency vs stability")
-    plt.legend(frameon=False, fontsize=8, loc="lower left")
-    cbar = plt.colorbar(sc, fraction=0.046, pad=0.04)
-    cbar.set_label("Judge integrity")
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_pareto_2d.pdf")
-    plt.close()
-
-    # Pro dancer effects difference (Top 20)
-    pro_effects_sorted = pro_effects.copy()
-    pro_effects_sorted["pro_clean"] = pro_effects_sorted["pro"].apply(clean_pro_name)
-    pro_effects_sorted = (
-        pro_effects_sorted.groupby("pro_clean", as_index=False)
-        .agg({"effect_j": "mean", "effect_f": "mean", "se": "mean"})
-    )
-    pro_effects_sorted["diff"] = pro_effects_sorted["effect_f"] - pro_effects_sorted["effect_j"]
-    pro_effects_sorted = pro_effects_sorted.sort_values("diff", ascending=False, key=lambda s: s.abs()).head(20)
-    fig, ax = plt.subplots(1, 1, figsize=(6.2, 5.2))
-    y_pos = np.arange(len(pro_effects_sorted))
-    ax.errorbar(pro_effects_sorted["diff"], y_pos, xerr=pro_effects_sorted["se"], fmt="o", color=COLOR_ACCENT)
-    ax.axvline(0, color=COLOR_GRAY, linestyle="--", linewidth=0.9)
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(pro_effects_sorted["pro_clean"], fontsize=7)
-    ax.set_xlabel("Effect difference (Fans - Judges)")
-    ax.set_title("Pro dancer effects: fans vs judges")
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_pro_diff_forest.pdf")
-    plt.close(fig)
-
-    # Feature effect scatter
-    def extract_effects(params: pd.Series) -> pd.Series:
-        eff = params.copy()
-        eff = eff.drop(labels=[x for x in eff.index if x.startswith("Intercept")], errors="ignore")
-        return eff
-
-    fe_j_series = extract_effects(fe_j)
-    fe_f_series = extract_effects(fe_f)
-    common_idx = fe_j_series.index.intersection(fe_f_series.index)
-    x = fe_j_series[common_idx]
-    y = fe_f_series[common_idx]
-    plt.figure(figsize=(5.4, 4.2))
-    plt.scatter(x, y, color=COLOR_PRIMARY)
-    lim = max(abs(x).max(), abs(y).max())
-    plt.plot([-lim, lim], [-lim, lim], color=COLOR_GRAY, linestyle="--")
-    # annotate most divergent features
-    dist = (y - x).abs()
-    top_idx = dist.sort_values(ascending=False).head(5).index
-    label_offsets = {
-        "C(celebrity_industry)[T.Fitness Instructor]": (6, 8),
-        "C(celebrity_industry)[T.Politician]": (6, -8),
-    }
-    for idx in top_idx:
-        raw_label = str(idx)
-        label = (
-            raw_label
-            .replace("celebrity_industry_", "ind:")
-            .replace("ballroom_partner_", "pro:")
-        )
-        dx, dy = label_offsets.get(raw_label, (4, 4))
-        plt.annotate(
-            label,
-            (x[idx], y[idx]),
-            xytext=(dx, dy),
-            textcoords="offset points",
-            fontsize=7,
-            alpha=0.85,
-            ha="left",
-            va="center",
-        )
-    plt.xlabel("Judge effect")
-    plt.ylabel("Fan effect")
-    plt.title("Feature impacts: judges vs fans")
-    plt.savefig(FIG_DIR / "fig_feature_scatter.pdf")
-    plt.close()
-
-    # AUC curve
-    if not auc_df.empty:
-        plt.figure(figsize=(5.2, 3.4))
-        plt.plot(auc_df["season"], auc_df["auc"], marker="o", color=COLOR_PRIMARY)
-        plt.xlabel("Season")
-        plt.ylabel("AUC")
-        plt.title("Forward-chaining AUC (GBDT)")
-        plt.savefig(FIG_DIR / "fig_auc_forward.pdf")
+        plt.savefig(FIG_DIR / "fig_uncertainty_heatmap.pdf")
         plt.close()
-        log(f"AUC points: {len(auc_df)}")
-
-    # Judge-save curve (示意)
-    xs = np.linspace(-10, 10, 200)
-    ys = 1 / (1 + np.exp(-JUDGESAVE_BETA * xs))
-    plt.figure(figsize=(5.0, 3.4))
-    plt.plot(xs, ys, color=COLOR_PRIMARY)
-    plt.xlabel("Judge score difference")
-    plt.ylabel("P(eliminate a)")
-    # 标注 β 为示意值
-    plt.annotate(f"β={JUDGESAVE_BETA} (illustrative)", xy=(0.95, 0.95), xycoords="axes fraction",
-                 fontsize=8, va="top", ha="right", style="italic",
-                 bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
-    plt.title("Judge-save decision curve")
-    plt.savefig(FIG_DIR / "fig_judgesave_curve.pdf")
-    plt.close()
-
-    # ========== Hard-7: Beta 敏感性分析（仅冲突周统计）==========
-    # 口径声明：
-    # - beta 是"政策参数/治理强度"，不是"校准估计"
-    # - 仅在 A=1（冲突周：Percent ≠ Rank）统计
-    # - Integrity = judge-save 选择"评委分更高者"的比例
-    # - Agency deviation = 与 Percent 结果偏离率（冲突周内）
-    # - 若任何核心结论翻转（integrity < 0.5 或 agency_deviation 剧变），应降级强叙事
-    betas = BETA_SENSITIVITY_VALUES  # 使用全局配置的敏感性分析点
-    beta_records = []
-    for beta in betas:
-        integrity_sum = 0.0
-        agency_dev_sum = 0.0
-        conflict_count = 0
-        for (season, week), wdf in season_week_groups:
-            final_week = int(season_max_week.get(int(season), int(week)))
-            if int(week) >= final_week:
-                continue
-            active_df = wdf[wdf["active"]].copy()
-            if len(active_df) == 0:
-                continue
-            key = (int(season), int(week))
-            samples = samples_cache.get(key)
-            if samples is None or len(samples) == 0:
-                continue
-            if len(samples) > MAX_SAMPLES_PER_WEEK:
-                idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
-                samples = samples[idx]
-
-            j_share = active_df["judge_share"].to_numpy()
-            j_scores = active_df["judge_total"].to_numpy()
-            j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
-            j_share_matrix = np.tile(j_share, (len(samples), 1))
-            comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples
-            elim_p = np.argmin(comb_percent, axis=1)
-            fan_rank = np.argsort(np.argsort(-samples, axis=1), axis=1) + 1
-            comb_rank = fan_rank + np.tile(j_rank, (len(samples), 1))
-            elim_r = np.argmax(comb_rank, axis=1)
-            conflict_mask = elim_p != elim_r
-            if not np.any(conflict_mask):
-                continue
-
-            p_idx = elim_p[conflict_mask]
-            r_idx = elim_r[conflict_mask]
-            diff = j_scores[r_idx] - j_scores[p_idx]
-            p_elim_p = 1 / (1 + np.exp(-beta * diff))
-            j_p = j_scores[p_idx]
-            j_r = j_scores[r_idx]
-            higher_is_p = j_p >= j_r
-            same_score = j_p == j_r
-            success_prob = np.where(same_score, 0.5, np.where(higher_is_p, 1 - p_elim_p, p_elim_p))
-            integrity_sum += float(success_prob.sum())
-            agency_dev_sum += float((1 - p_elim_p).sum())
-            conflict_count += len(p_elim_p)
-
-        if conflict_count > 0:
-            integrity = integrity_sum / conflict_count
-            agency_deviation = agency_dev_sum / conflict_count
-            beta_records.append({
-                "beta": beta,
-                "integrity": integrity,
-                "agency_deviation": agency_deviation,
-                "conflict_samples": conflict_count,
-                # Hard-7 验收字段
-                "integrity_pass": bool(integrity >= 0.5),  # 核心结论：judge-save 应选择更高分者
-                "note": "policy_parameter (not calibrated estimate)",
-            })
-
-    beta_df = pd.DataFrame(beta_records)
-    if not beta_df.empty:
-        beta_df.to_csv(OUTPUT_DIR / "beta_sensitivity.csv", index=False, encoding="utf-8")
-        
-        # ========== Hard-7 验收输出：敏感性分析结论 ==========
-        all_integrity_pass = all(r["integrity_pass"] for r in beta_records)
-        integrity_range = (min(r["integrity"] for r in beta_records), max(r["integrity"] for r in beta_records))
-        agency_range = (min(r["agency_deviation"] for r in beta_records), max(r["agency_deviation"] for r in beta_records))
-        hard7_summary = {
-            "description": "Hard-7 beta 敏感性分析：检查核心结论是否在参数变动下翻转",
-            "beta_values_tested": betas,
-            "scope": "conflict weeks only (A=1, Percent != Rank)",
-            "integrity_definition": "P(judge-save selects higher-judge-score contestant)",
-            "agency_deviation_definition": "1 - P(follow Percent result in conflict week)",
-            "all_integrity_pass": all_integrity_pass,
-            "integrity_range": [round(integrity_range[0], 4), round(integrity_range[1], 4)],
-            "agency_deviation_range": [round(agency_range[0], 4), round(agency_range[1], 4)],
-            "conclusion_stable": all_integrity_pass,  # 核心结论：judge-save 有效
-            "note": "beta is a policy parameter (governance strength), not a calibrated estimate",
-            "narrative_guidance": "If all_integrity_pass=False, downgrade strong claims about judge-save effectiveness",
-        }
-        (OUTPUT_DIR / "audit_beta_sensitivity.json").write_text(json.dumps(hard7_summary, indent=2), encoding="utf-8")
-        log(f"Hard-7 Beta Sensitivity: integrity_range={integrity_range}, all_pass={all_integrity_pass}")
-
-        fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.4))
-        diff_grid = np.linspace(-3, 3, 240)
-        for beta in betas:
-            axes[0].plot(diff_grid, 1 / (1 + np.exp(-beta * diff_grid)), label=f"β={beta:.0f}")
-        axes[0].set_xlabel("Judge score diff (r − p)")
-        axes[0].set_ylabel("P(eliminate percent candidate)")
-        axes[0].set_title("Decision sensitivity (logit)")
-        axes[0].legend(frameon=False, fontsize=8)
-
-        axes[1].plot(beta_df["agency_deviation"], beta_df["integrity"], marker="o", color=COLOR_PRIMARY)
-        for _, row in beta_df.iterrows():
-            axes[1].annotate(f"β={row['beta']:.0f}", (row["agency_deviation"], row["integrity"]),
-                             textcoords="offset points", xytext=(4, 4), fontsize=8)
-        axes[1].set_xlabel("Agency deviation (conflict weeks)")
-        axes[1].set_ylabel("Integrity (conflict weeks)")
-        axes[1].set_title("Trade-off under β")
-        axes[1].set_xlim(0, 1)
-        axes[1].set_ylim(0, 1)
+    
+        # Wrongful heatmap
+        plt.figure(figsize=(6.6, 4.4))
+        cmap_wrongful = sns.light_palette("#6BAED6", as_cmap=True)
+        ax = sns.heatmap(
+            wrongful_heat,
+            cmap=cmap_wrongful,
+            cbar_kws={"label": "Wrongful prob"},
+            vmin=0.0,
+            vmax=1.0,
+            mask=np.isnan(wrongful_heat),
+        )
+        ax.set_xticks(np.arange(max_week) + 0.5)
+        ax.set_xticklabels(np.arange(1, max_week + 1))
+        season_idx = np.arange(max_season)
+        y_step = 2 if max_season > 20 else 1
+        y_ticks = season_idx[::y_step]
+        ax.set_yticks(y_ticks + 0.5)
+        ax.set_yticklabels(y_ticks + 1, fontsize=7)
+        plt.xlabel("Week")
+        plt.ylabel("Season")
+        plt.title("Wrongful elimination probability by week\n(blank cells = no elimination or missing data)")
         plt.tight_layout()
-        plt.savefig(FIG_DIR / "fig_beta_sensitivity.pdf")
-        plt.close(fig)
-
-    # Posterior predictive coverage (简化)
-    coverage = 1 - np.nanmean(wrongful_heat)
-    brier = np.nanmean(wrongful_heat * (1 - wrongful_heat))
-    plt.figure(figsize=(4.8, 3.4))
-    bars = plt.bar(["Coverage ↑", "Brier ↓"], [coverage, brier], color=[COLOR_PRIMARY, COLOR_ACCENT])
-    # 在柱上标注数值
-    for bar, val in zip(bars, [coverage, brier]):
-        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
-                 f"{val:.3f}", ha="center", va="bottom", fontsize=9)
-    plt.ylim(0, 1.1)
-    plt.title("Posterior predictive checks (higher coverage, lower Brier is better)")
-    plt.savefig(FIG_DIR / "fig_ppc_summary.pdf")
-    plt.close()
-
-    # =========================
-    # 争议案例 Ridgeline（自动筛选“冤案”）
-    # =========================
-    log("Rendering smart controversy ridgeline chart...")
-    top_controversy = (
-        posterior_df[posterior_df["is_eliminated_week"]]
-        .sort_values("fan_share_mean", ascending=False)
-        .drop_duplicates(subset=["celebrity_name"])
-        .head(4)
-    )
-    controversy_names = top_controversy["celebrity_name"].tolist()
-    if not controversy_names:
-        controversy_names = ["Jerry Rice", "Billy Ray Cyrus", "Bristol Palin", "Bobby Bones"]
-
-    fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.2), sharex=False)
-    axes = axes.flatten()
-    for ax, name in zip(axes, controversy_names):
-        sub = posterior_df[posterior_df["celebrity_name"] == name].copy()
-        if sub.empty:
-            ax.text(0.5, 0.5, f"{name}\\nNot Found", ha="center", va="center")
-            ax.axis("off")
-            continue
-
-        weeks = sorted(sub["week"].unique())
-        max_x = max(0.30, sub["fan_share_mean"].max() + 0.10)
-        x = np.linspace(0, max_x, 200)
-        elim_week = sub[sub["is_eliminated_week"]]["week"].min()
-
-        for i, w in enumerate(weeks):
-            row = sub[sub["week"] == w].iloc[0]
-            mu = row["fan_share_mean"]
-            width = max(row["hdi_width"], 1e-3)
-            sigma = width / 3.0
-            density = np.exp(-0.5 * ((x - mu) / sigma) ** 2)
-
-            is_elim = (w == elim_week)
-            color = COLOR_WARNING if is_elim else COLOR_PRIMARY
-            alpha = 0.60 if is_elim else 0.20
-            offset = i * 0.5
-            ax.fill_between(x, offset, offset + density * 0.8, color=color, alpha=alpha)
-            ax.plot(x, offset + density * 0.8, color=color, linewidth=1.0 if is_elim else 0.6)
-            if is_elim:
-                ax.text(max_x * 0.95, offset, "ELIMINATED", color=COLOR_WARNING, fontsize=8, ha="right", fontweight="bold")
-
-        season_id = int(sub.iloc[0]["season"])
-        ax.set_title(f"{name} (Season {season_id})", fontsize=9)
-        ax.set_yticks([])
-        if ax in (axes[2], axes[3]):
-            ax.set_xlabel("Estimated fan share")
-    plt.suptitle("Democratic deficit: high fan support yet eliminated", fontsize=11, y=0.98)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_controversy_ridgeline.pdf")
-    plt.close(fig)
-
-    # =========================
-    # Counterfactual elimination risk timelines
-    # =========================
-    log("Rendering counterfactual risk timelines...")
-
-    def compute_elim_probs(samples_arr: np.ndarray, active_df: pd.DataFrame, daws_tier: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        m = len(samples_arr)
-        n = len(active_df)
-        if m == 0 or n == 0:
-            return (np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n))
-
-        j_share = active_df["judge_share"].to_numpy()
-        j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
-        j_scores = active_df["judge_total"].to_numpy()
-        j_share_matrix = np.tile(j_share, (m, 1))
-
-        comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples_arr
-        elim_p = np.argmin(comb_percent, axis=1)
-        prob_p = np.bincount(elim_p, minlength=n) / m
-
-        fan_rank = np.argsort(np.argsort(-samples_arr, axis=1), axis=1) + 1
-        comb_rank = fan_rank + np.tile(j_rank, (m, 1))
-        elim_r = np.argmax(comb_rank, axis=1)
-        prob_r = np.bincount(elim_r, minlength=n) / m
-
-        # judge-save expected elimination probability (no extra RNG)
-        bottom_two = np.argpartition(comb_rank, -2, axis=1)[:, -2:]
-        a_idx = bottom_two[:, 0]
-        b_idx = bottom_two[:, 1]
-        diff = j_scores[b_idx] - j_scores[a_idx]
-        p_elim_a = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff))
-        prob_s = np.zeros(n)
-        for i in range(n):
-            mask_a = (a_idx == i)
-            mask_b = (b_idx == i)
-            if mask_a.any():
-                prob_s[i] += p_elim_a[mask_a].sum()
-            if mask_b.any():
-                prob_s[i] += (1 - p_elim_a[mask_b]).sum()
-        prob_s = prob_s / m
-
-        elim_f = np.argmin(samples_arr, axis=1)
-        prob_f = np.bincount(elim_f, minlength=n) / m
-
-        conflict_mask = elim_p != elim_r
-        if daws_tier == "Red":
-            prob_d = prob_f
+        plt.savefig(FIG_DIR / "fig_wrongful_heatmap.pdf")
+        plt.close()
+    
+        # Conflict map
+        cm_df = posterior_df.copy()
+        plt.figure(figsize=(5.8, 4.2))
+        sizes = 200 * cm_df["hdi_width"].clip(0, cm_df["hdi_width"].quantile(0.95))
+        colors = cm_df["is_eliminated_week"].map(lambda x: COLOR_WARNING if x else COLOR_PRIMARY)
+        plt.scatter(cm_df["judge_share"], cm_df["fan_share_mean"], s=sizes, c=colors, alpha=0.75, edgecolors="none")
+        legend_handles = [
+            plt.Line2D([0], [0], marker="o", color="w", label="Eliminated week", markerfacecolor=COLOR_WARNING, markersize=6),
+            plt.Line2D([0], [0], marker="o", color="w", label="Not eliminated", markerfacecolor=COLOR_PRIMARY, markersize=6),
+            plt.Line2D([0], [0], marker="o", color="w", label="HDI width (size)", markerfacecolor=COLOR_GRAY, markersize=8),
+        ]
+        plt.xlabel("Judge share")
+        plt.ylabel("Fan share (posterior mean)")
+        plt.title("Elimination is not always aligned with minimum fan support")
+        plt.legend(handles=legend_handles, frameon=False, fontsize=8, loc="lower right")
+        plt.savefig(FIG_DIR / "fig_conflict_map.pdf")
+        plt.close()
+    
+        # Conflict combo: HDI size + wrongful标注
+        combo_df = cm_df.copy()
+        combo_df["wrongful"] = False
+        for (season, week), sub in combo_df.groupby(["season", "week"], sort=False):
+            if sub.empty:
+                continue
+            min_fan = sub["fan_share_mean"].min()
+            wrongful_mask = (sub["is_eliminated_week"]) & (sub["fan_share_mean"] > min_fan + 1e-6)
+            combo_df.loc[wrongful_mask.index, "wrongful"] = wrongful_mask
+        plt.figure(figsize=(5.8, 4.2))
+        sizes = 220 * combo_df["hdi_width"].clip(0, combo_df["hdi_width"].quantile(0.95))
+        colors = combo_df["is_eliminated_week"].map(lambda x: COLOR_WARNING if x else COLOR_PRIMARY)
+        plt.scatter(combo_df["judge_share"], combo_df["fan_share_mean"], s=sizes, c=colors, alpha=0.70, edgecolors="none")
+        wrongful_pts = combo_df[combo_df["wrongful"]]
+        legend_handles = [
+            plt.Line2D([0], [0], marker="o", color="w", label="Eliminated week", markerfacecolor=COLOR_WARNING, markersize=6),
+            plt.Line2D([0], [0], marker="o", color="w", label="Not eliminated", markerfacecolor=COLOR_PRIMARY, markersize=6),
+            plt.Line2D([0], [0], marker="o", color="w", label="HDI width (size)", markerfacecolor=COLOR_GRAY, markersize=8),
+        ]
+        if not wrongful_pts.empty:
+            plt.scatter(
+                wrongful_pts["judge_share"],
+                wrongful_pts["fan_share_mean"],
+                s=120,
+                facecolors="none",
+                edgecolors=COLOR_PRIMARY_DARK,
+                linewidths=1.2,
+                label="Wrongful elimination",
+            )
+        plt.xlabel("Judge share")
+        plt.ylabel("Fan share (posterior mean)")
+        plt.title("Conflict + uncertainty + wrongful eliminations")
+        if not wrongful_pts.empty:
+            legend_handles.append(
+                plt.Line2D([0], [0], marker="o", color=COLOR_PRIMARY_DARK, label="Wrongful elimination", markerfacecolor="none", markersize=7),
+            )
+        plt.legend(handles=legend_handles, loc="lower right", frameon=False, fontsize=8)
+        plt.savefig(FIG_DIR / "fig_conflict_combo.pdf")
+        plt.close()
+    
+        # ========== Hard-4 声明：Sigma sensitivity 仅为后处理/可视化 ==========
+        # gaussian_filter1d 仅用于绘图/敏感性探索，不进入：
+        #   - 可行性判定 (strict_feasible_mask)
+        #   - 采样过滤 (sample_week_percent)
+        #   - 机制指标计算 (evaluate_mechanisms)
+        # 此图应在论文中标注为 "exploratory post-processing" 而非 "temporal prior"
+        sigma_vals = []
+        sigma_widths = []
+        for sigma in SIGMA_LIST:
+            # 简化：对周均宽度进行高斯平滑（仅用于可视化敏感性，不影响主结论）
+            smoothed = gaussian_filter1d(np.nan_to_num(week_metrics_df["mean_hdi_width"], nan=np.nanmean(week_metrics_df["mean_hdi_width"])), sigma)
+            sigma_vals.append(sigma)
+            sigma_widths.append(float(np.mean(smoothed)))
+        plt.figure(figsize=(5.6, 3.6))
+        plt.plot(sigma_vals, sigma_widths, marker="o", color=COLOR_PRIMARY)
+        plt.xlabel("Sigma")
+        plt.ylabel("Average HDI width")
+        plt.title("Sensitivity of HDI width to sigma")
+        plt.savefig(FIG_DIR / "fig_sigma_sensitivity.pdf")
+        plt.close()
+    
+        # Rule switch
+        plt.figure(figsize=(5.8, 3.6))
+        plt.plot(evidence_df["season"], evidence_df["prob_rank"], color=COLOR_PRIMARY, marker="o")
+        plt.axvline(28, color=COLOR_GRAY, linestyle="--", linewidth=1.0)
+        plt.xlabel("Season")
+        plt.ylabel("P(rank+save)")
+        plt.title("Inferred rule switch probability")
+        plt.savefig(FIG_DIR / "fig_rule_switch.pdf")
+        plt.close()
+    
+        # DAWS trigger schedule
+        log("Rendering DAWS trigger schedule...")
+        week_u = week_metrics_df.groupby("week")["mean_hdi_width"].mean().reset_index()
+        if "audit_weak" in week_metrics_df.columns:
+            audit_week = week_metrics_df.groupby("week")["audit_weak"].mean().reset_index()
+            week_u = week_u.merge(audit_week, on="week", how="left")
+            week_u["audit_weak"] = week_u["audit_weak"].fillna(0.0) > 0
         else:
-            prob_d = np.zeros(n)
-            if np.any(~conflict_mask):
-                prob_d += np.bincount(elim_p[~conflict_mask], minlength=n)
-            if np.any(conflict_mask):
-                c1 = elim_p[conflict_mask]
-                c2 = elim_r[conflict_mask]
-                diff_c = j_scores[c2] - j_scores[c1]
-                p_elim_c1 = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_c))
-                np.add.at(prob_d, c1, p_elim_c1)
-                np.add.at(prob_d, c2, 1 - p_elim_c1)
-            prob_d = prob_d / m
-
-        return prob_p, prob_r, prob_s, prob_d
-
-    risk_records: List[Dict[str, object]] = []
-    for name in controversy_names:
-        sub = posterior_df[posterior_df["celebrity_name"] == name]
-        if sub.empty:
-            continue
-        for (season, week), _ in sub.groupby(["season", "week"]):
-            wdf = long_df[(long_df["season"] == season) & (long_df["week"] == week)]
-            active_df = wdf[wdf["active"]].copy()
-            if active_df.empty:
-                continue
-            active_df = active_df.reset_index(drop=True)
-            idx_list = active_df.index[active_df["celebrity_name"] == name].tolist()
-            if not idx_list:
-                continue
-            c_idx = int(idx_list[0])
-
-            key = (int(season), int(week))
-            samples = samples_cache.get(key)
-            if samples is None or len(samples) == 0:
-                samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
-                samples_cache[key] = samples
-            if len(samples) == 0:
-                continue
-            samples_use = samples
-            if len(samples_use) > MAX_SAMPLES_PER_WEEK:
-                idx = RNG.choice(len(samples_use), size=MAX_SAMPLES_PER_WEEK, replace=False)
-                samples_use = samples_use[idx]
-
-            mean_width = week_metrics_df[
-                (week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)
-            ]["mean_hdi_width"].mean()
-            if np.isnan(mean_width):
-                mean_width = 0.0
-            final_week = int(season_max_week.get(int(season), int(week)))
-            eval_tier = determine_daws_eval_tier(int(week), final_week)
-
-            prob_p, prob_r, prob_s, prob_d = compute_elim_probs(samples_use, active_df, eval_tier)
-            risk_records.extend([
-                {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Percent", "prob": float(prob_p[c_idx])},
-                {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Rank", "prob": float(prob_r[c_idx])},
-                {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Save", "prob": float(prob_s[c_idx])},
-                {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "DAWS", "prob": float(prob_d[c_idx])},
-            ])
-
-    risk_df = pd.DataFrame(risk_records)
-    if not risk_df.empty:
-        fig, axes = plt.subplots(2, 2, figsize=(7.6, 5.6), sharex=False, sharey=True)
+            week_u["audit_weak"] = False
+        if not week_u.empty:
+            week_u = week_u.sort_values("week")
+            max_week_all = int(week_u["week"].max())
+            tier_map = {"Green": 1, "Yellow": 2, "Red": 3}
+            tiers = []
+            for _, row in week_u.iterrows():
+                mean_width = float(row["mean_hdi_width"])
+                if np.isnan(mean_width):
+                    mean_width = 0.0
+                tier_label, _ = determine_daws_tier(mean_width, int(row["week"]), max_week_all, u_p90, u_p97)
+                tiers.append(tier_map[tier_label])
+            fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.6), sharex=True)
+            axes[0].plot(week_u["week"], week_u["mean_hdi_width"], marker="o", color=COLOR_PRIMARY, label="U_t (monitoring)")
+            if week_u["audit_weak"].any():
+                axes[0].scatter(
+                    week_u.loc[week_u["audit_weak"], "week"],
+                    week_u.loc[week_u["audit_weak"], "mean_hdi_width"],
+                    marker="x",
+                    color=COLOR_WARNING,
+                    s=45,
+                    label="Audit-Weak flagged",
+                )
+            axes[0].axhline(u_p90, color=COLOR_ACCENT, linestyle="--", linewidth=1.0, label=f"P{int(DAWS_U_P90 * 100)} threshold")
+            axes[0].axhline(u_p97, color=COLOR_WARNING, linestyle="--", linewidth=1.0, label=f"P{int(DAWS_U_P97 * 100)} threshold")
+            axes[0].set_ylabel("U_t (mean HDI width)")
+            axes[0].set_title("Monitoring signal U_t (audit + disclosure)")
+            axes[0].legend(frameon=False, fontsize=8, loc="upper right")
+    
+            axes[1].step(week_u["week"], tiers, where="mid", color=COLOR_PRIMARY_DARK, linewidth=1.6)
+            axes[1].set_ylabel("Tier")
+            axes[1].set_xlabel("Week")
+            axes[1].set_ylim(0.7, 3.3)
+            axes[1].set_yticks([1, 2, 3])
+            axes[1].set_yticklabels(["Green", "Yellow", "Red"])
+            plt.tight_layout()
+            plt.savefig(FIG_DIR / "fig_daws_trigger.pdf")
+            plt.close(fig)
+    
+        # Dashboard 概念图
+        log("Rendering dashboard concept...")
+        render_dashboard_concept()
+    
+        # Mechanism radar
+        def radar_plot(
+            stats_dict: Dict[str, Dict[str, float]],
+            labels: List[str],
+            fname: str,
+            title: str,
+            tick_labels: List[str] | None = None,
+        ) -> None:
+            categories = ["agency", "judge_integrity", "stability"]
+            if tick_labels is None:
+                tick_labels = ["Agency", "Integrity", "Stability"]
+            angles = np.linspace(0, 2 * math.pi, len(categories), endpoint=False).tolist()
+            angles += angles[:1]
+            fig = plt.figure(figsize=(4.8, 4.2))
+            ax = plt.subplot(111, polar=True)
+            for label in labels:
+                values = [stats_dict[label][c] for c in categories]
+                values += values[:1]
+                ax.plot(angles, values, label=label)
+                ax.fill(angles, values, alpha=0.10)
+            ax.set_thetagrids(np.degrees(angles[:-1]), tick_labels)
+            ax.set_title(title)
+            ax.legend(loc="upper right", bbox_to_anchor=(1.15, 1.05))
+            fig.savefig(FIG_DIR / fname)
+            plt.close(fig)
+    
+        radar_plot(
+            {"Percent": stats_percent, "Rank": stats_rank, "DAWS": stats_daws},
+            ["Percent", "Rank", "DAWS"],
+            "fig_mechanism_radar.pdf",
+            "Mechanism trade-offs",
+        )
+    
+        radar_plot(
+            {"Percent": stats_percent_conf, "Rank": stats_rank_conf, "DAWS": stats_daws_conf},
+            ["Percent", "Rank", "DAWS"],
+            "fig_mechanism_radar_conflict.pdf",
+            "Mechanism trade-offs (conflict weeks)",
+            tick_labels=["Agency (Pct align)", "Integrity", "Stability"],
+        )
+    
+        # Mechanism compare (bar)
+        labels = ["Agency", "Integrity", "Stability"]
+        percent_vals = [stats_percent["agency"], stats_percent["judge_integrity"], stats_percent["stability"]]
+        rank_vals = [stats_rank["agency"], stats_rank["judge_integrity"], stats_rank["stability"]]
+        daws_vals = [stats_daws["agency"], stats_daws["judge_integrity"], stats_daws["stability"]]
+        x = np.arange(len(labels))
+        width = 0.24
+        plt.figure(figsize=(6.2, 3.6))
+        plt.bar(x - width, percent_vals, width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
+        plt.bar(x, rank_vals, width, label="Rank", color=COLOR_GRAY, alpha=0.85)
+        plt.bar(x + width, daws_vals, width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
+        plt.xticks(x, labels)
+        plt.ylim(0, 1)
+        plt.ylabel("Score")
+        plt.title("Mechanism comparison (numeric)")
+        plt.legend(frameon=False, fontsize=8)
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_mechanism_compare.pdf")
+        plt.close()
+    
+        # Mechanism compare (bar) - conflict weeks only
+        labels = ["Agency (pct align)", "Integrity", "Stability"]
+        percent_vals = [stats_percent_conf["agency"], stats_percent_conf["judge_integrity"], stats_percent_conf["stability"]]
+        rank_vals = [stats_rank_conf["agency"], stats_rank_conf["judge_integrity"], stats_rank_conf["stability"]]
+        daws_vals = [stats_daws_conf["agency"], stats_daws_conf["judge_integrity"], stats_daws_conf["stability"]]
+        x = np.arange(len(labels))
+        width = 0.24
+        plt.figure(figsize=(6.2, 3.6))
+        plt.bar(x - width, percent_vals, width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
+        plt.bar(x, rank_vals, width, label="Rank", color=COLOR_GRAY, alpha=0.85)
+        plt.bar(x + width, daws_vals, width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
+        plt.xticks(x, labels, fontsize=9)
+        plt.ylim(0, 1)
+        plt.ylabel("Score")
+        plt.title("Mechanism comparison (conflict weeks)")
+        plt.legend(frameon=False, fontsize=8)
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_mechanism_compare_conflict.pdf")
+        plt.close()
+    
+        # Pareto-like trade-off (2D)
+        def stats_for_alpha(alpha: float) -> Dict[str, float]:
+            totals = {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0}
+            for (season, week), wdf in season_week_groups:
+                active_df = wdf[wdf["active"]].copy()
+                if len(active_df) == 0:
+                    continue
+                key = (int(season), int(week))
+                samples = samples_cache.get(key)
+                if samples is None or len(samples) == 0:
+                    samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+                    samples_cache[key] = samples
+                if len(samples) == 0:
+                    continue
+                res = evaluate_mechanisms(samples, active_df, alpha, "Green", EPSILON, RNG)
+                m = res["count"]
+                totals["agency_sum"] += res["daws"]["agency"] * m
+                totals["instability_sum"] += res["daws"]["instability"] * m
+                totals["judge_integrity_sum"] += res["daws"]["judge_integrity"] * m
+                totals["count"] += m
+            if totals["count"] == 0:
+                return {"agency": float("nan"), "stability": float("nan"), "judge_integrity": float("nan")}
+            agency = totals["agency_sum"] / totals["count"]
+            stability = 1.0 - (totals["instability_sum"] / totals["count"])
+            judge_integrity = totals["judge_integrity_sum"] / totals["count"]
+            return {"agency": float(agency), "stability": float(stability), "judge_integrity": float(judge_integrity)}
+    
+        alpha_grid = np.linspace(0.05, 0.95, 10)
+        curve = [stats_for_alpha(a) for a in alpha_grid]
+        xs = [c["agency"] for c in curve]
+        ys = [c["stability"] for c in curve]
+        cs = [c["judge_integrity"] for c in curve]
+    
+        plt.figure(figsize=(5.2, 4.2))
+        plt.plot(xs, ys, color=COLOR_GRAY, linewidth=1.1, alpha=0.6)
+        sc = plt.scatter(xs, ys, c=cs, cmap="cividis", s=25, zorder=2)
+        plt.scatter(stats_percent["agency"], stats_percent["stability"], color=COLOR_PRIMARY, s=55, marker="o", label="Percent")
+        plt.scatter(stats_rank["agency"], stats_rank["stability"], color=COLOR_GRAY, s=55, marker="s", label="Rank")
+        plt.scatter(stats_daws["agency"], stats_daws["stability"], color=COLOR_ACCENT, s=85, marker="*", label="DAWS")
+        plt.xlabel("Viewer agency")
+        plt.ylabel("Stability")
+        plt.ylim(0, 1)
+        plt.xlim(0, 1)
+        plt.title("Pareto trade-off: agency vs stability")
+        plt.legend(frameon=False, fontsize=8, loc="lower left")
+        cbar = plt.colorbar(sc, fraction=0.046, pad=0.04)
+        cbar.set_label("Judge integrity")
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_pareto_2d.pdf")
+        plt.close()
+    
+        # Pro dancer effects difference (Top 20)
+        pro_effects_sorted = pro_effects.copy()
+        pro_effects_sorted["pro_clean"] = pro_effects_sorted["pro"].apply(clean_pro_name)
+        pro_effects_sorted = (
+            pro_effects_sorted.groupby("pro_clean", as_index=False)
+            .agg({"effect_j": "mean", "effect_f": "mean", "se": "mean"})
+        )
+        pro_effects_sorted["diff"] = pro_effects_sorted["effect_f"] - pro_effects_sorted["effect_j"]
+        pro_effects_sorted = pro_effects_sorted.sort_values("diff", ascending=False, key=lambda s: s.abs()).head(20)
+        fig, ax = plt.subplots(1, 1, figsize=(6.2, 5.2))
+        y_pos = np.arange(len(pro_effects_sorted))
+        ax.errorbar(pro_effects_sorted["diff"], y_pos, xerr=pro_effects_sorted["se"], fmt="o", color=COLOR_ACCENT)
+        ax.axvline(0, color=COLOR_GRAY, linestyle="--", linewidth=0.9)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(pro_effects_sorted["pro_clean"], fontsize=7)
+        ax.set_xlabel("Effect difference (Fans - Judges)")
+        ax.set_title("Pro dancer effects: fans vs judges")
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_pro_diff_forest.pdf")
+        plt.close(fig)
+    
+        # Feature effect scatter
+        def extract_effects(params: pd.Series) -> pd.Series:
+            eff = params.copy()
+            eff = eff.drop(labels=[x for x in eff.index if x.startswith("Intercept")], errors="ignore")
+            return eff
+    
+        fe_j_series = extract_effects(fe_j)
+        fe_f_series = extract_effects(fe_f)
+        common_idx = fe_j_series.index.intersection(fe_f_series.index)
+        x = fe_j_series[common_idx]
+        y = fe_f_series[common_idx]
+        plt.figure(figsize=(5.4, 4.2))
+        plt.scatter(x, y, color=COLOR_PRIMARY)
+        lim = max(abs(x).max(), abs(y).max())
+        plt.plot([-lim, lim], [-lim, lim], color=COLOR_GRAY, linestyle="--")
+        # annotate most divergent features
+        dist = (y - x).abs()
+        top_idx = dist.sort_values(ascending=False).head(5).index
+        label_offsets = {
+            "C(celebrity_industry)[T.Fitness Instructor]": (6, 8),
+            "C(celebrity_industry)[T.Politician]": (6, -8),
+        }
+        for idx in top_idx:
+            raw_label = str(idx)
+            label = (
+                raw_label
+                .replace("celebrity_industry_", "ind:")
+                .replace("ballroom_partner_", "pro:")
+            )
+            dx, dy = label_offsets.get(raw_label, (4, 4))
+            plt.annotate(
+                label,
+                (x[idx], y[idx]),
+                xytext=(dx, dy),
+                textcoords="offset points",
+                fontsize=7,
+                alpha=0.85,
+                ha="left",
+                va="center",
+            )
+        plt.xlabel("Judge effect")
+        plt.ylabel("Fan effect")
+        plt.title("Feature impacts: judges vs fans")
+        plt.savefig(FIG_DIR / "fig_feature_scatter.pdf")
+        plt.close()
+    
+        # AUC curve
+        if not auc_df.empty:
+            plt.figure(figsize=(5.2, 3.4))
+            plt.plot(auc_df["season"], auc_df["auc"], marker="o", color=COLOR_PRIMARY)
+            plt.xlabel("Season")
+            plt.ylabel("AUC")
+            plt.title("Forward-chaining AUC (GBDT)")
+            plt.savefig(FIG_DIR / "fig_auc_forward.pdf")
+            plt.close()
+            log(f"AUC points: {len(auc_df)}")
+    
+        # Judge-save curve (示意)
+        xs = np.linspace(-10, 10, 200)
+        ys = 1 / (1 + np.exp(-JUDGESAVE_BETA * xs))
+        plt.figure(figsize=(5.0, 3.4))
+        plt.plot(xs, ys, color=COLOR_PRIMARY)
+        plt.xlabel("Judge score difference")
+        plt.ylabel("P(eliminate a)")
+        # 标注 β 为示意值
+        plt.annotate(f"β={JUDGESAVE_BETA} (illustrative)", xy=(0.95, 0.95), xycoords="axes fraction",
+                     fontsize=8, va="top", ha="right", style="italic",
+                     bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+        plt.title("Judge-save decision curve")
+        plt.savefig(FIG_DIR / "fig_judgesave_curve.pdf")
+        plt.close()
+    
+        # ========== Hard-7: Beta 敏感性分析（仅冲突周统计）==========
+        # 口径声明：
+        # - beta 是"政策参数/治理强度"，不是"校准估计"
+        # - 仅在 A=1（冲突周：Percent ≠ Rank）统计
+        # - Integrity = judge-save 选择"评委分更高者"的比例
+        # - Agency deviation = 与 Percent 结果偏离率（冲突周内）
+        # - 若任何核心结论翻转（integrity < 0.5 或 agency_deviation 剧变），应降级强叙事
+        betas = BETA_SENSITIVITY_VALUES  # 使用全局配置的敏感性分析点
+        beta_records = []
+        for beta in betas:
+            integrity_sum = 0.0
+            agency_dev_sum = 0.0
+            conflict_count = 0
+            for (season, week), wdf in season_week_groups:
+                final_week = int(season_max_week.get(int(season), int(week)))
+                if int(week) >= final_week:
+                    continue
+                active_df = wdf[wdf["active"]].copy()
+                if len(active_df) == 0:
+                    continue
+                key = (int(season), int(week))
+                samples = samples_cache.get(key)
+                if samples is None or len(samples) == 0:
+                    continue
+                if len(samples) > MAX_SAMPLES_PER_WEEK:
+                    idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
+                    samples = samples[idx]
+    
+                j_share = active_df["judge_share"].to_numpy()
+                j_scores = active_df["judge_total"].to_numpy()
+                j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+                j_share_matrix = np.tile(j_share, (len(samples), 1))
+                comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples
+                elim_p = np.argmin(comb_percent, axis=1)
+                fan_rank = np.argsort(np.argsort(-samples, axis=1), axis=1) + 1
+                comb_rank = fan_rank + np.tile(j_rank, (len(samples), 1))
+                elim_r = np.argmax(comb_rank, axis=1)
+                conflict_mask = elim_p != elim_r
+                if not np.any(conflict_mask):
+                    continue
+    
+                p_idx = elim_p[conflict_mask]
+                r_idx = elim_r[conflict_mask]
+                diff = j_scores[r_idx] - j_scores[p_idx]
+                p_elim_p = 1 / (1 + np.exp(-beta * diff))
+                j_p = j_scores[p_idx]
+                j_r = j_scores[r_idx]
+                higher_is_p = j_p >= j_r
+                same_score = j_p == j_r
+                success_prob = np.where(same_score, 0.5, np.where(higher_is_p, 1 - p_elim_p, p_elim_p))
+                integrity_sum += float(success_prob.sum())
+                agency_dev_sum += float((1 - p_elim_p).sum())
+                conflict_count += len(p_elim_p)
+    
+            if conflict_count > 0:
+                integrity = integrity_sum / conflict_count
+                agency_deviation = agency_dev_sum / conflict_count
+                beta_records.append({
+                    "beta": beta,
+                    "integrity": integrity,
+                    "agency_deviation": agency_deviation,
+                    "conflict_samples": conflict_count,
+                    # Hard-7 验收字段
+                    "integrity_pass": bool(integrity >= 0.5),  # 核心结论：judge-save 应选择更高分者
+                    "note": "policy_parameter (not calibrated estimate)",
+                })
+    
+        beta_df = pd.DataFrame(beta_records)
+        if not beta_df.empty:
+            beta_df.to_csv(OUTPUT_DIR / "beta_sensitivity.csv", index=False, encoding="utf-8")
+            
+            # ========== Hard-7 验收输出：敏感性分析结论 ==========
+            all_integrity_pass = all(r["integrity_pass"] for r in beta_records)
+            integrity_range = (min(r["integrity"] for r in beta_records), max(r["integrity"] for r in beta_records))
+            agency_range = (min(r["agency_deviation"] for r in beta_records), max(r["agency_deviation"] for r in beta_records))
+            hard7_summary = {
+                "description": "Hard-7 beta 敏感性分析：检查核心结论是否在参数变动下翻转",
+                "beta_values_tested": betas,
+                "scope": "conflict weeks only (A=1, Percent != Rank)",
+                "integrity_definition": "P(judge-save selects higher-judge-score contestant)",
+                "agency_deviation_definition": "1 - P(follow Percent result in conflict week)",
+                "all_integrity_pass": all_integrity_pass,
+                "integrity_range": [round(integrity_range[0], 4), round(integrity_range[1], 4)],
+                "agency_deviation_range": [round(agency_range[0], 4), round(agency_range[1], 4)],
+                "conclusion_stable": all_integrity_pass,  # 核心结论：judge-save 有效
+                "note": "beta is a policy parameter (governance strength), not a calibrated estimate",
+                "narrative_guidance": "If all_integrity_pass=False, downgrade strong claims about judge-save effectiveness",
+            }
+            (OUTPUT_DIR / "audit_beta_sensitivity.json").write_text(json.dumps(hard7_summary, indent=2), encoding="utf-8")
+            log(f"Hard-7 Beta Sensitivity: integrity_range={integrity_range}, all_pass={all_integrity_pass}")
+    
+            fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.4))
+            diff_grid = np.linspace(-3, 3, 240)
+            for beta in betas:
+                axes[0].plot(diff_grid, 1 / (1 + np.exp(-beta * diff_grid)), label=f"β={beta:.0f}")
+            axes[0].set_xlabel("Judge score diff (r − p)")
+            axes[0].set_ylabel("P(eliminate percent candidate)")
+            axes[0].set_title("Decision sensitivity (logit)")
+            axes[0].legend(frameon=False, fontsize=8)
+    
+            axes[1].plot(beta_df["agency_deviation"], beta_df["integrity"], marker="o", color=COLOR_PRIMARY)
+            for _, row in beta_df.iterrows():
+                axes[1].annotate(f"β={row['beta']:.0f}", (row["agency_deviation"], row["integrity"]),
+                                 textcoords="offset points", xytext=(4, 4), fontsize=8)
+            axes[1].set_xlabel("Agency deviation (conflict weeks)")
+            axes[1].set_ylabel("Integrity (conflict weeks)")
+            axes[1].set_title("Trade-off under β")
+            axes[1].set_xlim(0, 1)
+            axes[1].set_ylim(0, 1)
+            plt.tight_layout()
+            plt.savefig(FIG_DIR / "fig_beta_sensitivity.pdf")
+            plt.close(fig)
+    
+        # Posterior predictive coverage (简化)
+        coverage = 1 - np.nanmean(wrongful_heat)
+        brier = np.nanmean(wrongful_heat * (1 - wrongful_heat))
+        plt.figure(figsize=(4.8, 3.4))
+        bars = plt.bar(["Coverage ↑", "Brier ↓"], [coverage, brier], color=[COLOR_PRIMARY, COLOR_ACCENT])
+        # 在柱上标注数值
+        for bar, val in zip(bars, [coverage, brier]):
+            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
+                     f"{val:.3f}", ha="center", va="bottom", fontsize=9)
+        plt.ylim(0, 1.1)
+        plt.title("Posterior predictive checks (higher coverage, lower Brier is better)")
+        plt.savefig(FIG_DIR / "fig_ppc_summary.pdf")
+        plt.close()
+    
+        # =========================
+        # 争议案例 Ridgeline（自动筛选“冤案”）
+        # =========================
+        log("Rendering smart controversy ridgeline chart...")
+        top_controversy = (
+            posterior_df[posterior_df["is_eliminated_week"]]
+            .sort_values("fan_share_mean", ascending=False)
+            .drop_duplicates(subset=["celebrity_name"])
+            .head(4)
+        )
+        controversy_names = top_controversy["celebrity_name"].tolist()
+        if not controversy_names:
+            controversy_names = ["Jerry Rice", "Billy Ray Cyrus", "Bristol Palin", "Bobby Bones"]
+    
+        fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.2), sharex=False)
         axes = axes.flatten()
-        color_map = {"Percent": COLOR_PRIMARY, "Rank": COLOR_GRAY, "Save": COLOR_ACCENT, "DAWS": COLOR_WARNING}
         for ax, name in zip(axes, controversy_names):
-            sub = risk_df[risk_df["celebrity_name"] == name]
+            sub = posterior_df[posterior_df["celebrity_name"] == name].copy()
             if sub.empty:
                 ax.text(0.5, 0.5, f"{name}\\nNot Found", ha="center", va="center")
                 ax.axis("off")
                 continue
-            season_id = int(sub["season"].iloc[0])
-            for mech in ["Percent", "Rank", "Save", "DAWS"]:
-                line = sub[sub["mechanism"] == mech].sort_values("week")
-                ax.plot(line["week"], line["prob"], marker="o", linewidth=1.2, label=mech, color=color_map[mech])
+    
+            weeks = sorted(sub["week"].unique())
+            max_x = max(0.30, sub["fan_share_mean"].max() + 0.10)
+            x = np.linspace(0, max_x, 200)
+            elim_week = sub[sub["is_eliminated_week"]]["week"].min()
+    
+            for i, w in enumerate(weeks):
+                row = sub[sub["week"] == w].iloc[0]
+                mu = row["fan_share_mean"]
+                width = max(row["hdi_width"], 1e-3)
+                sigma = width / 3.0
+                density = np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+    
+                is_elim = (w == elim_week)
+                color = COLOR_WARNING if is_elim else COLOR_PRIMARY
+                alpha = 0.60 if is_elim else 0.20
+                offset = i * 0.5
+                ax.fill_between(x, offset, offset + density * 0.8, color=color, alpha=alpha)
+                ax.plot(x, offset + density * 0.8, color=color, linewidth=1.0 if is_elim else 0.6)
+                if is_elim:
+                    ax.text(max_x * 0.95, offset, "ELIMINATED", color=COLOR_WARNING, fontsize=8, ha="right", fontweight="bold")
+    
+            season_id = int(sub.iloc[0]["season"])
             ax.set_title(f"{name} (Season {season_id})", fontsize=9)
-            ax.set_xlabel("Week")
-            ax.set_ylim(0, 1)
-        axes[0].set_ylabel("P(eliminated)")
-        axes[2].set_ylabel("P(eliminated)")
-        handles, labels = axes[0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc="upper center", ncol=4, frameon=False, fontsize=8)
-        plt.tight_layout(rect=[0, 0, 1, 0.94])
-        plt.savefig(FIG_DIR / "fig_counterfactual_risk_timeline.pdf")
+            ax.set_yticks([])
+            if ax in (axes[2], axes[3]):
+                ax.set_xlabel("Estimated fan share")
+        plt.suptitle("Democratic deficit: high fan support yet eliminated", fontsize=11, y=0.98)
+        plt.tight_layout()
+        plt.savefig(FIG_DIR / "fig_controversy_ridgeline.pdf")
         plt.close(fig)
-
-    # =========================
-    # Finalists outcome changes (bar chart)
-    # =========================
-    log("Rendering finalists outcome change chart...")
-    def get_finalists(season_df: pd.DataFrame) -> List[str]:
-        top = season_df.sort_values("placement").head(3)
-        return top["celebrity_name"].tolist()
-
-    def predict_finalists(season: int, mechanism: str) -> List[str]:
-        # 用最终周的均值 fan share 与 judge share 近似预测
-        season_long = long_df[long_df["season"] == season]
-        last_week = int(season_long["week"].max())
-        wk = posterior_df[(posterior_df["season"] == season) & (posterior_df["week"] == last_week)]
-        if wk.empty:
-            return []
-        j_share = wk["judge_share"].to_numpy()
-        v_share = wk["fan_share_mean"].to_numpy()
-        if mechanism == "percent":
-            combined = 0.5 * j_share + 0.5 * v_share
-        elif mechanism == "rank":
-            j_rank = pd.Series(j_share).rank(ascending=False, method="average").to_numpy()
-            f_rank = (-v_share).argsort().argsort() + 1
-            combined = -(j_rank + f_rank)
-        else:
-            final_week = int(season_max_week.get(int(season), int(last_week)))
-            eval_tier = determine_daws_eval_tier(int(last_week), final_week)
-            if eval_tier == "Red":
-                combined = v_share
+    
+        # =========================
+        # Counterfactual elimination risk timelines
+        # =========================
+        log("Rendering counterfactual risk timelines...")
+    
+        def compute_elim_probs(samples_arr: np.ndarray, active_df: pd.DataFrame, daws_tier: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            m = len(samples_arr)
+            n = len(active_df)
+            if m == 0 or n == 0:
+                return (np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n))
+    
+            j_share = active_df["judge_share"].to_numpy()
+            j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+            j_scores = active_df["judge_total"].to_numpy()
+            j_share_matrix = np.tile(j_share, (m, 1))
+    
+            comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples_arr
+            elim_p = np.argmin(comb_percent, axis=1)
+            prob_p = np.bincount(elim_p, minlength=n) / m
+    
+            fan_rank = np.argsort(np.argsort(-samples_arr, axis=1), axis=1) + 1
+            comb_rank = fan_rank + np.tile(j_rank, (m, 1))
+            elim_r = np.argmax(comb_rank, axis=1)
+            prob_r = np.bincount(elim_r, minlength=n) / m
+    
+            # judge-save expected elimination probability (no extra RNG)
+            bottom_two = np.argpartition(comb_rank, -2, axis=1)[:, -2:]
+            a_idx = bottom_two[:, 0]
+            b_idx = bottom_two[:, 1]
+            diff = j_scores[b_idx] - j_scores[a_idx]
+            p_elim_a = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff))
+            prob_s = np.zeros(n)
+            for i in range(n):
+                mask_a = (a_idx == i)
+                mask_b = (b_idx == i)
+                if mask_a.any():
+                    prob_s[i] += p_elim_a[mask_a].sum()
+                if mask_b.any():
+                    prob_s[i] += (1 - p_elim_a[mask_b]).sum()
+            prob_s = prob_s / m
+    
+            elim_f = np.argmin(samples_arr, axis=1)
+            prob_f = np.bincount(elim_f, minlength=n) / m
+    
+            conflict_mask = elim_p != elim_r
+            if daws_tier == "Red":
+                prob_d = prob_f
             else:
-                combined = 0.5 * j_share + 0.5 * v_share
-        idx = np.argsort(-combined)[:3]
-        return wk.iloc[idx]["celebrity_name"].tolist()
-
-    def compute_outcome_metrics(mechanism: str) -> Dict[str, float]:
-        seasons_count = 0
-        champ_change = 0
-        top3_mismatch = 0.0
-
-        for season in sorted(df["season"].unique()):
-            season_df = df[df["season"] == season].copy()
-            actual_top3 = get_finalists(season_df)
-            if len(actual_top3) < 3:
+                prob_d = np.zeros(n)
+                if np.any(~conflict_mask):
+                    prob_d += np.bincount(elim_p[~conflict_mask], minlength=n)
+                if np.any(conflict_mask):
+                    c1 = elim_p[conflict_mask]
+                    c2 = elim_r[conflict_mask]
+                    diff_c = j_scores[c2] - j_scores[c1]
+                    p_elim_c1 = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_c))
+                    np.add.at(prob_d, c1, p_elim_c1)
+                    np.add.at(prob_d, c2, 1 - p_elim_c1)
+                prob_d = prob_d / m
+    
+            return prob_p, prob_r, prob_s, prob_d
+    
+        risk_records: List[Dict[str, object]] = []
+        for name in controversy_names:
+            sub = posterior_df[posterior_df["celebrity_name"] == name]
+            if sub.empty:
                 continue
-            pred_top3 = predict_finalists(season, mechanism)
-            if len(pred_top3) < 3:
-                continue
-            seasons_count += 1
-            if pred_top3[0] != actual_top3[0]:
-                champ_change += 1
-            inter = len(set(pred_top3) & set(actual_top3))
-            top3_mismatch += 1.0 - (inter / 3.0)
-
-        # per-week elimination mismatch rate
-        elim_mismatch = 0
-        weeks_count = 0
-        for (season, week), wdf in season_week_groups:
-            active_df = wdf[wdf["active"]].copy()
-            if len(active_df) == 0:
-                continue
-            wk = posterior_df[(posterior_df["season"] == season) & (posterior_df["week"] == week)]
+            for (season, week), _ in sub.groupby(["season", "week"]):
+                wdf = long_df[(long_df["season"] == season) & (long_df["week"] == week)]
+                active_df = wdf[wdf["active"]].copy()
+                if active_df.empty:
+                    continue
+                active_df = active_df.reset_index(drop=True)
+                idx_list = active_df.index[active_df["celebrity_name"] == name].tolist()
+                if not idx_list:
+                    continue
+                c_idx = int(idx_list[0])
+    
+                key = (int(season), int(week))
+                samples = samples_cache.get(key)
+                if samples is None or len(samples) == 0:
+                    samples, _, _ = sample_week_percent(wdf, ALPHA_PERCENT, EPSILON, n_props)
+                    samples_cache[key] = samples
+                if len(samples) == 0:
+                    continue
+                samples_use = samples
+                if len(samples_use) > MAX_SAMPLES_PER_WEEK:
+                    idx = RNG.choice(len(samples_use), size=MAX_SAMPLES_PER_WEEK, replace=False)
+                    samples_use = samples_use[idx]
+    
+                mean_width = week_metrics_df[
+                    (week_metrics_df["season"] == season) & (week_metrics_df["week"] == week)
+                ]["mean_hdi_width"].mean()
+                if np.isnan(mean_width):
+                    mean_width = 0.0
+                final_week = int(season_max_week.get(int(season), int(week)))
+                eval_tier = determine_daws_eval_tier(int(week), final_week)
+    
+                prob_p, prob_r, prob_s, prob_d = compute_elim_probs(samples_use, active_df, eval_tier)
+                risk_records.extend([
+                    {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Percent", "prob": float(prob_p[c_idx])},
+                    {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Rank", "prob": float(prob_r[c_idx])},
+                    {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "Save", "prob": float(prob_s[c_idx])},
+                    {"celebrity_name": name, "season": int(season), "week": int(week), "mechanism": "DAWS", "prob": float(prob_d[c_idx])},
+                ])
+    
+        risk_df = pd.DataFrame(risk_records)
+        if not risk_df.empty:
+            fig, axes = plt.subplots(2, 2, figsize=(7.6, 5.6), sharex=False, sharey=True)
+            axes = axes.flatten()
+            color_map = {"Percent": COLOR_PRIMARY, "Rank": COLOR_GRAY, "Save": COLOR_ACCENT, "DAWS": COLOR_WARNING}
+            for ax, name in zip(axes, controversy_names):
+                sub = risk_df[risk_df["celebrity_name"] == name]
+                if sub.empty:
+                    ax.text(0.5, 0.5, f"{name}\\nNot Found", ha="center", va="center")
+                    ax.axis("off")
+                    continue
+                season_id = int(sub["season"].iloc[0])
+                for mech in ["Percent", "Rank", "Save", "DAWS"]:
+                    line = sub[sub["mechanism"] == mech].sort_values("week")
+                    ax.plot(line["week"], line["prob"], marker="o", linewidth=1.2, label=mech, color=color_map[mech])
+                ax.set_title(f"{name} (Season {season_id})", fontsize=9)
+                ax.set_xlabel("Week")
+                ax.set_ylim(0, 1)
+            axes[0].set_ylabel("P(eliminated)")
+            axes[2].set_ylabel("P(eliminated)")
+            handles, labels = axes[0].get_legend_handles_labels()
+            fig.legend(handles, labels, loc="upper center", ncol=4, frameon=False, fontsize=8)
+            plt.tight_layout(rect=[0, 0, 1, 0.94])
+            plt.savefig(FIG_DIR / "fig_counterfactual_risk_timeline.pdf")
+            plt.close(fig)
+    
+        # =========================
+        # Finalists outcome changes (bar chart)
+        # =========================
+        log("Rendering finalists outcome change chart...")
+        def get_finalists(season_df: pd.DataFrame) -> List[str]:
+            top = season_df.sort_values("placement").head(3)
+            return top["celebrity_name"].tolist()
+    
+        def predict_finalists(season: int, mechanism: str) -> List[str]:
+            # 用最终周的均值 fan share 与 judge share 近似预测
+            season_long = long_df[long_df["season"] == season]
+            last_week = int(season_long["week"].max())
+            wk = posterior_df[(posterior_df["season"] == season) & (posterior_df["week"] == last_week)]
             if wk.empty:
-                continue
-            elim_idx = [i for i, flag in enumerate(wk["is_eliminated_week"].to_numpy()) if flag]
-            if not elim_idx:
-                continue
-            weeks_count += 1
-            aligned = active_df[["celebrity_name", "judge_share", "judge_total"]].merge(
-                wk[["celebrity_name", "fan_share_mean"]],
-                on="celebrity_name",
-                how="left",
-            )
-            j_share = aligned["judge_share"].to_numpy()
-            v_share = aligned["fan_share_mean"].to_numpy()
+                return []
+            j_share = wk["judge_share"].to_numpy()
+            v_share = wk["fan_share_mean"].to_numpy()
             if mechanism == "percent":
-                combined = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
-                elim_pred = int(np.argmin(combined))
+                combined = 0.5 * j_share + 0.5 * v_share
             elif mechanism == "rank":
                 j_rank = pd.Series(j_share).rank(ascending=False, method="average").to_numpy()
                 f_rank = (-v_share).argsort().argsort() + 1
-                elim_pred = int(np.argmax(j_rank + f_rank))
+                combined = -(j_rank + f_rank)
             else:
-                j_scores = aligned["judge_total"].to_numpy()
-                final_week = int(season_max_week.get(int(season), int(week)))
-                eval_tier = determine_daws_eval_tier(int(week), final_week)
+                final_week = int(season_max_week.get(int(season), int(last_week)))
+                eval_tier = determine_daws_eval_tier(int(last_week), final_week)
                 if eval_tier == "Red":
-                    elim_pred = int(np.argmin(v_share))
+                    combined = v_share
                 else:
-                    combined_p = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
-                    elim_p = int(np.argmin(combined_p))
+                    combined = 0.5 * j_share + 0.5 * v_share
+            idx = np.argsort(-combined)[:3]
+            return wk.iloc[idx]["celebrity_name"].tolist()
+    
+        def compute_outcome_metrics(mechanism: str) -> Dict[str, float]:
+            seasons_count = 0
+            champ_change = 0
+            top3_mismatch = 0.0
+    
+            for season in sorted(df["season"].unique()):
+                season_df = df[df["season"] == season].copy()
+                actual_top3 = get_finalists(season_df)
+                if len(actual_top3) < 3:
+                    continue
+                pred_top3 = predict_finalists(season, mechanism)
+                if len(pred_top3) < 3:
+                    continue
+                seasons_count += 1
+                if pred_top3[0] != actual_top3[0]:
+                    champ_change += 1
+                inter = len(set(pred_top3) & set(actual_top3))
+                top3_mismatch += 1.0 - (inter / 3.0)
+    
+            # per-week elimination mismatch rate
+            elim_mismatch = 0
+            weeks_count = 0
+            for (season, week), wdf in season_week_groups:
+                active_df = wdf[wdf["active"]].copy()
+                if len(active_df) == 0:
+                    continue
+                wk = posterior_df[(posterior_df["season"] == season) & (posterior_df["week"] == week)]
+                if wk.empty:
+                    continue
+                elim_idx = [i for i, flag in enumerate(wk["is_eliminated_week"].to_numpy()) if flag]
+                if not elim_idx:
+                    continue
+                weeks_count += 1
+                aligned = active_df[["celebrity_name", "judge_share", "judge_total"]].merge(
+                    wk[["celebrity_name", "fan_share_mean"]],
+                    on="celebrity_name",
+                    how="left",
+                )
+                j_share = aligned["judge_share"].to_numpy()
+                v_share = aligned["fan_share_mean"].to_numpy()
+                if mechanism == "percent":
+                    combined = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
+                    elim_pred = int(np.argmin(combined))
+                elif mechanism == "rank":
                     j_rank = pd.Series(j_share).rank(ascending=False, method="average").to_numpy()
                     f_rank = (-v_share).argsort().argsort() + 1
-                    elim_r = int(np.argmax(j_rank + f_rank))
-                    if elim_p == elim_r:
-                        elim_pred = elim_p
+                    elim_pred = int(np.argmax(j_rank + f_rank))
+                else:
+                    j_scores = aligned["judge_total"].to_numpy()
+                    final_week = int(season_max_week.get(int(season), int(week)))
+                    eval_tier = determine_daws_eval_tier(int(week), final_week)
+                    if eval_tier == "Red":
+                        elim_pred = int(np.argmin(v_share))
                     else:
-                        diff = j_scores[elim_r] - j_scores[elim_p]
-                        p_elim_p = 1 / (1 + math.exp(-JUDGESAVE_BETA * diff))
-                        elim_pred = elim_p if p_elim_p >= 0.5 else elim_r
-            if elim_pred not in elim_idx:
-                elim_mismatch += 1
-
-        return {
-            "champ_change": (champ_change / seasons_count) if seasons_count else float("nan"),
-            "top3_mismatch": (top3_mismatch / seasons_count) if seasons_count else float("nan"),
-            "elim_mismatch": (elim_mismatch / weeks_count) if weeks_count else float("nan"),
-        }
-
-    mechs = ["percent", "rank", "daws"]
-    stats = {m: compute_outcome_metrics(m) for m in mechs}
-    labels = ["Champion change", "Top3 mismatch", "Elim mismatch"]
-    x = np.arange(len(labels))
-    width = 0.24
-    plt.figure(figsize=(6.4, 3.6))
-    plt.bar(x - width, [stats["percent"]["champ_change"], stats["percent"]["top3_mismatch"], stats["percent"]["elim_mismatch"]],
-            width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
-    plt.bar(x, [stats["rank"]["champ_change"], stats["rank"]["top3_mismatch"], stats["rank"]["elim_mismatch"]],
-            width, label="Rank", color=COLOR_GRAY, alpha=0.85)
-    plt.bar(x + width, [stats["daws"]["champ_change"], stats["daws"]["top3_mismatch"], stats["daws"]["elim_mismatch"]],
-            width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
-    plt.xticks(x, labels)
-    plt.ylim(0, 1)
-    plt.ylabel("Rate")
-    plt.title("Outcome changes under alternative mechanisms")
-    plt.legend(frameon=False, fontsize=8)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_alluvial_finalists.pdf")
-    plt.close()
-
-    # =========================
-    # 机制指标分布图（按季节聚合）
-    # =========================
-    if season_metrics_list:
-        sm_df = pd.DataFrame(season_metrics_list)
-        # 按季节聚合取均值
-        season_agg = sm_df.groupby("season").mean().reset_index()
-
-        fig, axes = plt.subplots(1, 3, figsize=(10, 3.5))
-
-        # Agency 分布
-        ax = axes[0]
-        ax.boxplot([season_agg["percent_agency"], season_agg["rank_agency"], season_agg["daws_agency"]],
-                   tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
-                   boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
-        ax.set_ylabel("Agency")
-        ax.set_title("Viewer Agency by Mechanism")
-
-        # Stability 分布
-        ax = axes[1]
-        ax.boxplot([season_agg["percent_stability"], season_agg["rank_stability"], season_agg["daws_stability"]],
-                   tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
-                   boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
-        ax.set_ylabel("Stability")
-        ax.set_title("Stability by Mechanism")
-
-        # Integrity 分布
-        ax = axes[2]
-        ax.boxplot([season_agg["percent_integrity"], season_agg["rank_integrity"], season_agg["daws_integrity"]],
-                   tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
-                   boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
-        ax.set_ylabel("Judge Integrity")
-        ax.set_title("Judge Integrity by Mechanism")
-
+                        combined_p = ALPHA_PERCENT * j_share + (1 - ALPHA_PERCENT) * v_share
+                        elim_p = int(np.argmin(combined_p))
+                        j_rank = pd.Series(j_share).rank(ascending=False, method="average").to_numpy()
+                        f_rank = (-v_share).argsort().argsort() + 1
+                        elim_r = int(np.argmax(j_rank + f_rank))
+                        if elim_p == elim_r:
+                            elim_pred = elim_p
+                        else:
+                            diff = j_scores[elim_r] - j_scores[elim_p]
+                            p_elim_p = 1 / (1 + math.exp(-JUDGESAVE_BETA * diff))
+                            elim_pred = elim_p if p_elim_p >= 0.5 else elim_r
+                if elim_pred not in elim_idx:
+                    elim_mismatch += 1
+    
+            return {
+                "champ_change": (champ_change / seasons_count) if seasons_count else float("nan"),
+                "top3_mismatch": (top3_mismatch / seasons_count) if seasons_count else float("nan"),
+                "elim_mismatch": (elim_mismatch / weeks_count) if weeks_count else float("nan"),
+            }
+    
+        mechs = ["percent", "rank", "daws"]
+        stats = {m: compute_outcome_metrics(m) for m in mechs}
+        labels = ["Champion change", "Top3 mismatch", "Elim mismatch"]
+        x = np.arange(len(labels))
+        width = 0.24
+        plt.figure(figsize=(6.4, 3.6))
+        plt.bar(x - width, [stats["percent"]["champ_change"], stats["percent"]["top3_mismatch"], stats["percent"]["elim_mismatch"]],
+                width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
+        plt.bar(x, [stats["rank"]["champ_change"], stats["rank"]["top3_mismatch"], stats["rank"]["elim_mismatch"]],
+                width, label="Rank", color=COLOR_GRAY, alpha=0.85)
+        plt.bar(x + width, [stats["daws"]["champ_change"], stats["daws"]["top3_mismatch"], stats["daws"]["elim_mismatch"]],
+                width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
+        plt.xticks(x, labels)
+        plt.ylim(0, 1)
+        plt.ylabel("Rate")
+        plt.title("Outcome changes under alternative mechanisms")
+        plt.legend(frameon=False, fontsize=8)
         plt.tight_layout()
-        plt.savefig(FIG_DIR / "fig_mechanism_distribution.pdf")
+        plt.savefig(FIG_DIR / "fig_alluvial_finalists.pdf")
         plt.close()
+    
+        # =========================
+        # 机制指标分布图（按季节聚合）
+        # =========================
+        if season_metrics_list:
+            sm_df = pd.DataFrame(season_metrics_list)
+            # 按季节聚合取均值
+            season_agg = sm_df.groupby("season").mean().reset_index()
+    
+            fig, axes = plt.subplots(1, 3, figsize=(10, 3.5))
+    
+            # Agency 分布
+            ax = axes[0]
+            ax.boxplot([season_agg["percent_agency"], season_agg["rank_agency"], season_agg["daws_agency"]],
+                       tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
+                       boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
+            ax.set_ylabel("Agency")
+            ax.set_title("Viewer Agency by Mechanism")
+    
+            # Stability 分布
+            ax = axes[1]
+            ax.boxplot([season_agg["percent_stability"], season_agg["rank_stability"], season_agg["daws_stability"]],
+                       tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
+                       boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
+            ax.set_ylabel("Stability")
+            ax.set_title("Stability by Mechanism")
+    
+            # Integrity 分布
+            ax = axes[2]
+            ax.boxplot([season_agg["percent_integrity"], season_agg["rank_integrity"], season_agg["daws_integrity"]],
+                       tick_labels=["Percent", "Rank", "DAWS"], patch_artist=True,
+                       boxprops=dict(facecolor=COLOR_GRAY, alpha=0.5))
+            ax.set_ylabel("Judge Integrity")
+            ax.set_title("Judge Integrity by Mechanism")
+    
+            plt.tight_layout()
+            plt.savefig(FIG_DIR / "fig_mechanism_distribution.pdf")
+            plt.close()
 
     # =========================
     # 输出指标与中间结果
@@ -3666,7 +3678,8 @@ if __name__ == "__main__":
                     run_idx += 1
                     log(f"Running scale experiment: scale={scale}, seed={seed} ({run_idx}/{total_runs})")
                     is_last = (scale == max_scale and seed == seeds[-1])
-                    summary = run_pipeline(n_props=scale, record_benchmark=True, save_outputs=is_last, seed=seed)
+                    # Skip rendering for non-final runs to speed up batch experiments
+                    summary = run_pipeline(n_props=scale, record_benchmark=True, save_outputs=is_last, seed=seed, skip_render=not is_last)
                     results.append(summary)
             if (FIG_DIR / "fig_scale_benchmark.pdf").exists():
                 log("Scale benchmark figure updated.")
