@@ -50,6 +50,7 @@ ALPHA_PERCENT = 0.5  # 百分比规则权重
 # q10 ≈ 0.06 时 recommended = ceil(500/0.06) ≈ 8333；写死默认 8000 确保 excluded_ratio < 20%
 N_PROPOSALS = int(os.getenv("MCM_N_PROPOSALS", "8000"))  # 主流程默认值（写死 8000）
 N_PROPOSALS_FAST = 2000  # 仅用于 smoke test / 快速复现，不得用于主结论
+Q_GATE = 0.10  # 采样预算 gate 分位数（写死，不可调政策）
 MIN_ACCEPT = 40  # 最少保留的可行样本（仅用于 fast check 诊断，不影响 strict）
 N_STRICT_MIN = 500  # strict feasible 最小样本阈值（写死）
 SIGMA_LIST = [0.5, 1.0, 1.5, 2.0]
@@ -1357,12 +1358,12 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         excluded_weeks = int(audit_meta_df["excluded_from_metrics"].sum()) if "excluded_from_metrics" in audit_meta_df else 0
         excluded_ratio = excluded_weeks / total_weeks if total_weeks > 0 else 0.0
         accept_rates = audit_meta_df["accept_rate_strict"].dropna() if "accept_rate_strict" in audit_meta_df else pd.Series(dtype=float)
-        # 统计三个口径：median / q10 / min
+        # 统计三个口径：median / q_gate / min
         median_accept = float(accept_rates.median()) if len(accept_rates) > 0 else 0.0
-        q10_accept = float(accept_rates.quantile(0.10)) if len(accept_rates) > 0 else 0.0
+        q_gate_accept = float(accept_rates.quantile(Q_GATE)) if len(accept_rates) > 0 else 0.0
         min_accept = float(accept_rates.min()) if len(accept_rates) > 0 else 0.0
-        # recommended 必须用 q10（非 median），确保覆盖低接受率尾部周
-        recommended_n_props = int(np.ceil(N_STRICT_MIN / q10_accept)) if q10_accept > 0 else 20000
+        # recommended 必须用 Q_GATE 分位数（非 median），确保覆盖低接受率尾部周
+        recommended_n_props = int(np.ceil(N_STRICT_MIN / q_gate_accept)) if q_gate_accept > 0 else 20000
         gate_triggered = excluded_ratio >= 0.20
 
         gate_info = {
@@ -1370,16 +1371,17 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "excluded_weeks": excluded_weeks,
             "excluded_from_metrics_ratio": round(excluded_ratio, 4),
             "accept_rate_strict_median": round(median_accept, 6),
-            "accept_rate_strict_q10": round(q10_accept, 6),
+            "accept_rate_strict_q_gate": round(q_gate_accept, 6),
             "accept_rate_strict_min": round(min_accept, 6),
-            "recommended_n_proposals_by_q10": recommended_n_props,
+            "Q_GATE": Q_GATE,
+            "recommended_n_proposals_by_q_gate": recommended_n_props,
             "current_n_proposals": n_props,
             "N_STRICT_MIN": N_STRICT_MIN,
             "N_PROPOSALS_FAST": N_PROPOSALS_FAST,
             "gate_triggered_20pct": gate_triggered,
         }
         (OUTPUT_DIR / "audit_block5_gate.json").write_text(json.dumps(gate_info, indent=2), encoding="utf-8")
-        log(f"Block5 Gate: excluded_ratio={excluded_ratio:.2%}, q10_accept={q10_accept:.4f}, recommended_by_q10={recommended_n_props}")
+        log(f"Block5 Gate: excluded_ratio={excluded_ratio:.2%}, q_gate_accept={q_gate_accept:.4f}, recommended_by_q_gate={recommended_n_props}")
         if gate_triggered:
             log("WARNING: excluded_ratio >= 20%, season-level conclusions should be marked as exploratory")
 

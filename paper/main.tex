@@ -281,7 +281,7 @@ For each week, constraints from the rule define a feasible region (a polytope) $
 \end{algorithm}
 
 \paragraph{Audit-Weak weeks (disclosure only).}
-When the feasible sampler yields too few accepted proposals ($n_{\text{accept}}<200$) or requires fallback, we flag the week as \textit{Audit-Weak}. In these cases, $V_t$ is treated as a disclosure/monitoring signal rather than a decision trigger, and we surface the flag in audit metadata for transparency.
+When the strict feasibility sampler yields fewer than $N_{\text{strict,min}} = 500$ accepted proposals, we flag the week as \textit{Audit-Weak}. These weeks are excluded from aggregate metrics and appear as marked points only. See Section~\ref{sec:audit-spec} and Appendix~\ref{app:audit-params} for full specification.
 
 \subsection{Rank Rule Feasible Orders (Monte Carlo)}
 \begin{algorithm}[H]
@@ -325,6 +325,28 @@ The fast approximation preserves all headline conclusions: flip-rate and deficit
 \includegraphics[width=0.90\linewidth]{figures/fig_fast_vs_strict.pdf}
 \caption{Fast vs strict posterior means; deviations are small and concentrated near the diagonal.}
 \end{figure}
+
+\subsection{Audit Specification and Feasibility Criteria}\label{sec:audit-spec}
+\takeaway{We fix all tolerance parameters and sampling budgets as non-adjustable policy to avoid post-hoc tuning.}
+
+\paragraph{Strict feasibility definition.}
+A vote vector $\mathbf{v}$ is \emph{strict feasible} if it satisfies:
+\begin{enumerate}[nosep,leftmargin=2em]
+\item \textbf{Simplex}: $v_i \ge 0$ for all $i$, and $|\sum_i v_i - 1| \le \varepsilon_{\text{sum}}$ with $\varepsilon_{\text{sum}} = 10^{-9}$.
+\item \textbf{Elimination}: For all eliminated contestants $e \in E$ and all survivors $s \in S$, we require $\max_e C_e \le \min_s C_s + \varepsilon_{\text{ord}}$ with $\varepsilon_{\text{ord}} = 10^{-6}$.
+\end{enumerate}
+Ties (where eliminated and surviving contestants have equal combined scores) are permitted; the tolerance $\varepsilon_{\text{ord}}$ handles numerical precision only.
+
+\paragraph{Sampling budget gate.}
+We require at least $N_{\text{strict,min}} = 500$ strict feasible samples per week. The default proposal count is determined by the \emph{10th percentile} of accept rates (not the median), because exclusion risk is driven by low-acceptance-rate tail weeks:
+\[
+N_{\text{proposals}} \ge \left\lceil \frac{N_{\text{strict,min}}}{q_{0.10}(\text{accept\_rate\_strict})} \right\rceil.
+\]
+The quantile $q = 0.10$ is fixed as non-adjustable policy. In our data, $q_{0.10} \approx 0.07$, yielding a recommended budget $\approx 7159$; we set $N_{\text{proposals}} = 8000$ (default).
+
+\paragraph{Excluded weeks and downgrade trigger.}
+Weeks with fewer than $N_{\text{strict,min}}$ strict feasible samples are flagged as \emph{Audit-Weak} and excluded from aggregate metrics (they appear as marked points only). \textbf{The goal is not to guarantee all weeks pass}, but to ensure the exclusion ratio $r_{\text{excl}} < 20\%$. Worst-case weeks (with accept rates near $0.008$) may be excluded; this is expected and disclosed. If $r_{\text{excl}} \ge 20\%$, all season-level conclusions are downgraded to ``exploratory.''
+
 \subsection{Identifiability and Feasible Mass}
 \takeaway{Feasible mass and HDI width quantify how informative each week is.}
 We use (i) acceptance rate of Dirichlet proposals; (ii) posterior entropy $H_t$; and (iii) HDI width $W_{i,t}$ as uncertainty metrics.
@@ -584,6 +606,37 @@ We include forward-chaining AUC results as a robustness check on covariate relev
 \caption{Forward-chaining AUC curve. Predictive performance is stable and supports the selected covariates.}
 \label{fig:auc-forward}
 \end{figure}
+
+\section{Audit Parameter Specification Table}\label{app:audit-params}
+All parameters below are fixed as \emph{non-adjustable policy}; they are not tuned based on results.
+
+\begin{table}[H]
+\centering
+\caption{Fixed audit parameters (Block 5 specification).}
+\label{tab:audit-params}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Parameter & Value & Description \\
+\midrule
+$\varepsilon_{\text{sum}}$ & $10^{-9}$ & Simplex sum tolerance \\
+$\varepsilon_{\text{ord}}$ & $10^{-6}$ & Elimination ordering tolerance \\
+$N_{\text{strict,min}}$ & 500 & Minimum strict feasible samples per week \\
+$q_{\text{gate}}$ & 0.10 & Quantile for budget calculation (fixed) \\
+$N_{\text{proposals}}$ & 8000 & Default proposal count (main results) \\
+$N_{\text{proposals,fast}}$ & 2000 & Fast mode for smoke tests only \\
+$r_{\text{excl,max}}$ & 20\% & Downgrade trigger threshold \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Interpretation.}
+\begin{itemize}[nosep,leftmargin=2em]
+\item \textbf{Ties allowed}: Eliminated contestants may tie with survivors ($\max E = \min S$).
+\item \textbf{Strict checks}: Simplex + elimination constraints; rank/percent rule checks are diagnostic only.
+\item \textbf{Excluded weeks}: Flagged as Audit-Weak, shown as marked points, not used in aggregate statistics.
+\item \textbf{Downgrade rule}: If excluded ratio $\ge 20\%$, season-level conclusions become ``exploratory.''
+\item \textbf{Worst-case disclosure}: Weeks with accept rate $\approx 0.008$ may be excluded; this is expected and does not invalidate the audit.
+\end{itemize}
 
 \clearpage
 \section*{References}
