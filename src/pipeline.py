@@ -379,13 +379,13 @@ def evaluate_mechanisms(
     elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
 
     conflict_mask = elim_p != elim_r
+    c1 = elim_p[conflict_mask] if np.any(conflict_mask) else np.array([], dtype=int)
+    c2 = elim_r[conflict_mask] if np.any(conflict_mask) else np.array([], dtype=int)
     if daws_tier == "Red":
         elim_d = np.argmin(samples, axis=1)
     else:
         elim_d = elim_p.copy()
         if np.any(conflict_mask):
-            c1 = elim_p[conflict_mask]
-            c2 = elim_r[conflict_mask]
             diff_c = j_scores[c2] - j_scores[c1]
             p_elim_c1 = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_c))
             rand_c = rng.random(np.sum(conflict_mask))
@@ -469,9 +469,15 @@ def evaluate_mechanisms(
         agency_r_c = np.mean(fan_lowest[conflict_mask] == elim_r[conflict_mask])
         agency_d_c = np.mean(fan_lowest[conflict_mask] == elim_d[conflict_mask])
 
-        integrity_p_c = np.mean(elim_p[conflict_mask] == judge_lowest)
-        integrity_r_c = np.mean(elim_r[conflict_mask] == judge_lowest)
-        integrity_d_c = np.mean(elim_d[conflict_mask] == judge_lowest)
+        elim_p_c = elim_p[conflict_mask]
+        elim_r_c = elim_r[conflict_mask]
+        elim_d_c = elim_d[conflict_mask]
+        other_p = c2
+        other_r = c1
+        other_d = np.where(elim_d_c == c1, c2, c1)
+        integrity_p_c = np.mean(j_scores[other_p] >= j_scores[elim_p_c])
+        integrity_r_c = np.mean(j_scores[other_r] >= j_scores[elim_r_c])
+        integrity_d_c = np.mean(j_scores[other_d] >= j_scores[elim_d_c])
 
         instability_p_c = np.mean(elim_p[conflict_mask] != elim_noise_p[conflict_mask])
         instability_r_c = np.mean(elim_r[conflict_mask] != elim_noise_r[conflict_mask])
