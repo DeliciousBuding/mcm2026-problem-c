@@ -1631,16 +1631,25 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
         # ========== Hard-3 结构性复核输出：对 double-elim 周汇总 bottomk_check_rate ==========
         # 这是主要 correctness 证据，独立于 R smoke test
-        STRUCTURAL_PASS_THRESHOLD = 0.999  # 写死阈值：要求所有 double-elim 周 check_rate >= 0.999
-        if len(double_elim_df) > 0 and "strict_bottomk_check_rate" in double_elim_df.columns:
-            double_check_rates = double_elim_df["strict_bottomk_check_rate"].dropna()
+        # 覆盖口径（写死）：结构性复核仅对 valid 周成立；excluded 周不进入 correctness 结论
+        STRUCTURAL_PASS_THRESHOLD = 0.999  # 写死阈值：要求所有 valid double-elim 周 check_rate >= 0.999
+        
+        n_double_elim_total = len(double_elim_df)
+        n_double_elim_valid = int((double_elim_df["valid_week"] == 1).sum()) if "valid_week" in double_elim_df.columns else 0
+        n_double_elim_excluded = int((double_elim_df["excluded_from_metrics"] == 1).sum()) if "excluded_from_metrics" in double_elim_df.columns else 0
+        
+        # 只对 valid 周做结构性复核统计
+        valid_double_elim_df = double_elim_df[double_elim_df["valid_week"] == 1] if "valid_week" in double_elim_df.columns else pd.DataFrame()
+        
+        if len(valid_double_elim_df) > 0 and "strict_bottomk_check_rate" in valid_double_elim_df.columns:
+            double_check_rates = valid_double_elim_df["strict_bottomk_check_rate"].dropna()
             if len(double_check_rates) > 0:
                 min_check_rate = float(double_check_rates.min())
                 median_check_rate = float(double_check_rates.median())
                 q10_check_rate = float(double_check_rates.quantile(0.10))
                 n_weeks_checked = int(len(double_check_rates))
-                total_samples_checked = int(double_elim_df["strict_bottomk_check_n"].sum())
-                # 验收：所有 double-elim 周的 check_rate >= STRUCTURAL_PASS_THRESHOLD
+                total_samples_checked = int(valid_double_elim_df["strict_bottomk_check_n"].sum())
+                # 验收：所有 valid double-elim 周的 check_rate >= STRUCTURAL_PASS_THRESHOLD
                 hard3_structural_pass = bool(min_check_rate >= STRUCTURAL_PASS_THRESHOLD)
             else:
                 min_check_rate = float("nan")
@@ -1660,17 +1669,24 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         structural_check = {
             "description": "Hard-3 结构性复核：对 accepted 样本显式重算 bottom-k residual",
             "check_definition": "residual = max(score_E) - min(score_S) on combined_score; pass iff residual <= EPS_ORD",
+            "structural_check_scope": "valid weeks only (n_accept_strict >= N_STRICT_MIN)",
             "eps_ord_used": EPS_ORD,
+            "n_strict_min_used": N_STRICT_MIN,
             "structural_pass_threshold": STRUCTURAL_PASS_THRESHOLD,
-            "n_double_elim_weeks_checked": n_weeks_checked,
+            # 覆盖口径拆分（写死）
+            "n_double_elim_weeks_total": n_double_elim_total,
+            "n_double_elim_weeks_valid": n_double_elim_valid,
+            "n_double_elim_weeks_excluded": n_double_elim_excluded,
+            "n_double_elim_weeks_checked": n_weeks_checked,  # 应当 == valid
             "total_samples_checked": total_samples_checked,
             "min_check_rate_double_elim": round(min_check_rate, 6) if not np.isnan(min_check_rate) else None,
             "median_check_rate_double_elim": round(median_check_rate, 6) if not np.isnan(median_check_rate) else None,
             "q10_check_rate_double_elim": round(q10_check_rate, 6) if not np.isnan(q10_check_rate) else None,
             "hard3_structural_pass": hard3_structural_pass,
+            "note_excluded": "excluded 周不进入 correctness 结论，仅作告警标记",
         }
         (OUTPUT_DIR / "audit_double_elim_structural_check.json").write_text(json.dumps(structural_check, indent=2), encoding="utf-8")
-        log(f"Hard-3 Structural: min_check_rate={min_check_rate:.6f}, pass={hard3_structural_pass}" if not np.isnan(min_check_rate) else "Hard-3 Structural: no double-elim data")
+        log(f"Hard-3 Structural: total={n_double_elim_total}, valid={n_double_elim_valid}, excluded={n_double_elim_excluded}, checked={n_weeks_checked}, min_check_rate={min_check_rate:.6f}, pass={hard3_structural_pass}" if not np.isnan(min_check_rate) else "Hard-3 Structural: no valid double-elim data")
 
         tier_records = []
         for _, row in week_metrics_df.iterrows():
