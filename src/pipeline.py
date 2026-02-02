@@ -66,6 +66,8 @@ DAWS_ALPHA_EXTREME = 0.50
 DAWS_U_P90 = 0.85
 DAWS_U_P97 = 0.95
 JUDGESAVE_BETA = 6.0
+# Judge-save evidence gate (share gap) before intervention
+JUDGESAVE_DIFF_THRESH = 0.05
 
 # 颜色规范（与图表规范一致）
 COLOR_PRIMARY = "#0072B2"
@@ -388,9 +390,12 @@ def evaluate_mechanisms(
         elim_d = elim_p.copy()
         if np.any(conflict_mask):
             diff_c = j_scores[c2] - j_scores[c1]
-            p_elim_c1 = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_c))
-            rand_c = rng.random(np.sum(conflict_mask))
-            elim_d[conflict_mask] = np.where(rand_c < p_elim_c1, c1, c2)
+            gate_mask = np.abs(j_share[c2] - j_share[c1]) >= JUDGESAVE_DIFF_THRESH
+            if np.any(gate_mask):
+                p_elim_c1 = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_c[gate_mask]))
+                rand_c = rng.random(np.sum(gate_mask))
+                conflict_idx = np.where(conflict_mask)[0]
+                elim_d[conflict_idx[gate_mask]] = np.where(rand_c < p_elim_c1, c1[gate_mask], c2[gate_mask])
 
     n = len(j_rank)
     if n < 2:
@@ -455,9 +460,12 @@ def evaluate_mechanisms(
             c1_n = elim_noise_p[conflict_noise]
             c2_n = elim_noise_r[conflict_noise]
             diff_cn = j_scores[c2_n] - j_scores[c1_n]
-            p_elim_c1n = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_cn))
-            rand_cn = rng.random(np.sum(conflict_noise))
-            elim_noise_d[conflict_noise] = np.where(rand_cn < p_elim_c1n, c1_n, c2_n)
+            gate_mask_n = np.abs(j_share[c2_n] - j_share[c1_n]) >= JUDGESAVE_DIFF_THRESH
+            if np.any(gate_mask_n):
+                p_elim_c1n = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_cn[gate_mask_n]))
+                rand_cn = rng.random(np.sum(gate_mask_n))
+                conflict_idx_n = np.where(conflict_noise)[0]
+                elim_noise_d[conflict_idx_n[gate_mask_n]] = np.where(rand_cn < p_elim_c1n, c1_n[gate_mask_n], c2_n[gate_mask_n])
 
     instability_p = np.mean(elim_p != elim_noise_p)
     instability_r = np.mean(elim_r != elim_noise_r)
@@ -2114,7 +2122,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             p_idx = elim_p[conflict_mask]
             r_idx = elim_r[conflict_mask]
             diff = j_scores[r_idx] - j_scores[p_idx]
-            p_elim_p = 1 / (1 + np.exp(-beta * diff))
+            diff_share = j_share[r_idx] - j_share[p_idx]
+            gate_mask = np.abs(diff_share) >= JUDGESAVE_DIFF_THRESH
+            p_elim_p = np.ones_like(diff)
+            if np.any(gate_mask):
+                p_elim_p[gate_mask] = 1 / (1 + np.exp(-beta * diff[gate_mask]))
             j_p = j_scores[p_idx]
             j_r = j_scores[r_idx]
             higher_is_p = j_p >= j_r

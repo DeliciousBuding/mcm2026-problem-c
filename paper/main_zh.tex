@@ -136,7 +136,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \node[red!70,anchor=west,scale=0.7] at (0.82,0.30) {elim};
 \end{tikzpicture}
 \end{center}
-\textbf{建议.} 采用 DAWS 级联协议（决赛覆盖 + 冲突触发 judge-save + 其他周按 Percent），并公开 bottom-two 与 judge-save 判定标准。
+\textbf{建议.} 采用 DAWS 级联协议（决赛覆盖 + 冲突触发且分差达标时 judge-save + 其他周按 Percent），并公开 bottom-two 与 judge-save 判定标准。
 \end{minipage}
 
 \clearpage
@@ -159,7 +159,7 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 
 \textbf{执行摘要.} 审计结果显示，Rank 规则会压缩粉丝支持度：约每 5 周中就有 1 周出现淘汰翻转风险。这形成“民主赤字”，并带来不必要的争议与声誉风险。
 
-\textbf{方案.} 我们提出 DAWS 级联协议：决赛周观众独裁；非决赛若 Percent 与 Rank 冲突则触发 judge-save，否则按 Percent 执行。不确定性信号 $V_t$ 仅用于披露等级与审计预算，不直接干预。该方案规则公开、易于解释且可直接执行。
+\textbf{方案.} 我们提出 DAWS 级联协议：决赛周观众独裁；非决赛若 Percent 与 Rank 冲突且评委分差达标则触发 judge-save，否则按 Percent 执行。不确定性信号 $V_t$ 仅用于披露等级与审计预算，不直接干预。该方案规则公开、易于解释且可直接执行。
 
 \textbf{价值.} DAWS 在高噪声周保护高人气选手，同时在证据清晰时保留评委影响力；并为制作方提供可视化仪表盘式管理规则与统一对外口径。
 
@@ -259,7 +259,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 \keyoutput{统一指标接口用于机制对比。}
 
 \begin{takeawaybox}
-\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用“规则冲突触发”设计：一致周沿用 50/50 规则，冲突周启用 judge-save（$\beta=6.0$），仅决赛周为观众独裁；P85/P95 监控线用于可视化透明度。
+\textbf{方法论一致性说明.} 主流程采用 MaxEnt 可行区域采样（Dirichlet 提案 + 约束筛选），LP/MILP 仅用于局部验证。稳定性按“同机制扰动前后”计算以保证可比性。DAWS 采用“规则冲突触发 + 分差门槛”设计：一致周沿用 50/50 规则，冲突且分差达标时启用 judge-save（$\beta=6.0$），仅决赛周为观众独裁；P85/P95 监控线用于可视化透明度。
 \end{takeawaybox}
 
 \section{模型A：可行区域审计}
@@ -461,7 +461,7 @@ GBDT 仅作为协变量有效性的鲁棒性检验，细节置于附录~\ref{app
 我们将“民主赤字”定义为 $D=\Pr(E^{(\text{rank})}_t \ne E^{(\text{percent})}_t)$，并以此作为触发条件。DAWS 包含两种运行模式 + 决赛覆盖：
 \begin{itemize}[leftmargin=2em]
 \item \textbf{一致模式（A=0）.} 若 Percent 与 Rank 结论一致，直接沿用 Percent（50/50），保留观众话语权。
-\item \textbf{冲突模式（A=1）.} 若结论冲突，触发 judge-save 在两名候选人中纠偏。
+\item \textbf{冲突模式（A=1）.} 若结论冲突且评委分差达到阈值 $\Delta$，触发 judge-save 在两名候选人中纠偏；否则沿用 Percent。
 \item \textbf{决赛（红）.} 观众独裁。
 \end{itemize}
 干预仅由 $A_t$（规则冲突）触发，$V_t$ 仅用于披露/审计预算。我们保留 $U_t$ 作为监控信号；图~\ref{fig:daws-trigger} 展示 P85/P95 监控线以增强透明度。
@@ -490,6 +490,7 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \Pr(E=a\mid\{a,b\})=\sigma\big(\beta(J_b-J_a)\big)
 \end{equation}
 在冲突周，我们将评委视为更果断的把关者，设定 $\beta=6.0$，以体现对明显人气偏差的强纠偏。
+同时设定证据门槛：仅当评委分差满足 $\Delta=0.05$（share）时启动 judge-save，否则沿用 Percent 以保留观众能动性。
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.90\linewidth]{figures/fig_judgesave_curve.pdf}
