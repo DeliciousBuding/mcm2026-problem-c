@@ -469,6 +469,10 @@ def sample_week_percent(
         "used_fallback": used_fallback,
         "excluded_from_metrics": excluded_from_metrics,
         "valid_week": valid_week,
+        # ========== Hard-3 结构性复核所需信息 ==========
+        "judge_share": j,  # 用于重新计算 combined score
+        "elim_idx": elim_idx,  # 淘汰者索引
+        "alpha": alpha,  # 用于重新计算 combined score
     }
     return accepted_for_metrics, float(mask.mean()), meta
 
@@ -1120,6 +1124,9 @@ def process_season_samples(
                 # ========== Hard-3：淘汰人数与双淘汰标记 ==========
                 "eliminated_k": int(rule_diag["eliminated_k"]),
                 "is_double_elim_week": int(rule_diag["is_double_elim_week"]),
+                # ========== Hard-3 结构性复核（无样本时为 NaN/0）==========
+                "strict_bottomk_check_rate": float("nan"),
+                "strict_bottomk_check_n": 0,
                 "strict_feasible_flag": 0,
                 "used_fallback": 1,
                 "excluded_from_metrics": 1,
@@ -1148,6 +1155,43 @@ def process_season_samples(
                 "is_eliminated_week": row["is_eliminated_week"],
             })
 
+        # ========== Hard-3 结构性复核：对 accepted 样本显式重算 bottom-k residual ==========
+        # 这是独立于 strict_feasible_mask 的二次计算，用于可证伪自证
+        STRUCTURAL_CHECK_MAX = 2000  # 写死上限
+        j_share = meta.get("judge_share", np.array([]))
+        elim_idx = meta.get("elim_idx", [])
+        alpha_used = meta.get("alpha", alpha)
+        
+        if len(samples) > 0 and len(j_share) > 0 and len(elim_idx) > 0:
+            # 抽样或全量检查
+            n_check = min(len(samples), STRUCTURAL_CHECK_MAX)
+            if n_check < len(samples):
+                check_rng = np.random.default_rng(seed + int(week) * 100)
+                check_idx = check_rng.choice(len(samples), size=n_check, replace=False)
+                check_samples = samples[check_idx]
+            else:
+                check_samples = samples
+            
+            # 显式重算 combined score 和 bottom-k residual
+            c_check = alpha_used * j_share + (1 - alpha_used) * check_samples
+            n_contestants = c_check.shape[1]
+            elim_mask_check = np.zeros(n_contestants, dtype=bool)
+            elim_mask_check[elim_idx] = True
+            max_e_check = np.max(c_check[:, elim_mask_check], axis=1)
+            min_s_check = np.min(c_check[:, ~elim_mask_check], axis=1)
+            resid_check = max_e_check - min_s_check
+            # 通过当且仅当 residual <= EPS_ORD
+            pass_check = resid_check <= EPS_ORD
+            strict_bottomk_check_rate = float(pass_check.mean())
+            strict_bottomk_check_n = int(n_check)
+        elif len(elim_idx) == 0:
+            # 无淘汰者（finale 等），视为 trivial pass
+            strict_bottomk_check_rate = 1.0
+            strict_bottomk_check_n = len(samples)
+        else:
+            strict_bottomk_check_rate = float("nan")
+            strict_bottomk_check_n = 0
+
         week_metrics.append({
             "season": season,
             "week": week,
@@ -1173,6 +1217,9 @@ def process_season_samples(
             # ========== Hard-3：淘汰人数与双淘汰标记 ==========
             "eliminated_k": int(rule_diag["eliminated_k"]),
             "is_double_elim_week": int(rule_diag["is_double_elim_week"]),
+            # ========== Hard-3 结构性复核 ==========
+            "strict_bottomk_check_rate": strict_bottomk_check_rate,
+            "strict_bottomk_check_n": strict_bottomk_check_n,
             "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
             "used_fallback": int(meta.get("used_fallback", 0)),
             "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
@@ -1480,6 +1527,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         # Hard-3 字段（淘汰人数与双淘汰标记）：
         #   - eliminated_k: 该周淘汰人数
         #   - is_double_elim_week: 1 当且仅当 eliminated_k == 2
+        # Hard-3 结构性复核字段：
+        #   - strict_bottomk_check_rate: accepted 样本中 bottom-k 约束通过率
+        #   - strict_bottomk_check_n: 实际检查的样本数
         audit_cols = [
             "season",
             "week",
@@ -1498,6 +1548,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "rank_rule_diagnostic",
             "eliminated_k",
             "is_double_elim_week",
+            "strict_bottomk_check_rate",
+            "strict_bottomk_check_n",
             "feasible_flag",
             "fallback_flag",
             "strict_feasible_flag",
@@ -1576,6 +1628,49 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         }
         (OUTPUT_DIR / "audit_double_elim_check.json").write_text(json.dumps(double_elim_check, indent=2), encoding="utf-8")
         log(f"Hard-3 Check: R={R_double_single:.4f}, pass={hard3_check_pass}" if not np.isnan(R_double_single) else "Hard-3 Check: insufficient data")
+
+        # ========== Hard-3 结构性复核输出：对 double-elim 周汇总 bottomk_check_rate ==========
+        # 这是主要 correctness 证据，独立于 R smoke test
+        STRUCTURAL_PASS_THRESHOLD = 0.999  # 写死阈值：要求所有 double-elim 周 check_rate >= 0.999
+        if len(double_elim_df) > 0 and "strict_bottomk_check_rate" in double_elim_df.columns:
+            double_check_rates = double_elim_df["strict_bottomk_check_rate"].dropna()
+            if len(double_check_rates) > 0:
+                min_check_rate = float(double_check_rates.min())
+                median_check_rate = float(double_check_rates.median())
+                q10_check_rate = float(double_check_rates.quantile(0.10))
+                n_weeks_checked = int(len(double_check_rates))
+                total_samples_checked = int(double_elim_df["strict_bottomk_check_n"].sum())
+                # 验收：所有 double-elim 周的 check_rate >= STRUCTURAL_PASS_THRESHOLD
+                hard3_structural_pass = bool(min_check_rate >= STRUCTURAL_PASS_THRESHOLD)
+            else:
+                min_check_rate = float("nan")
+                median_check_rate = float("nan")
+                q10_check_rate = float("nan")
+                n_weeks_checked = 0
+                total_samples_checked = 0
+                hard3_structural_pass = False
+        else:
+            min_check_rate = float("nan")
+            median_check_rate = float("nan")
+            q10_check_rate = float("nan")
+            n_weeks_checked = 0
+            total_samples_checked = 0
+            hard3_structural_pass = False
+        
+        structural_check = {
+            "description": "Hard-3 结构性复核：对 accepted 样本显式重算 bottom-k residual",
+            "check_definition": "residual = max(score_E) - min(score_S) on combined_score; pass iff residual <= EPS_ORD",
+            "eps_ord_used": EPS_ORD,
+            "structural_pass_threshold": STRUCTURAL_PASS_THRESHOLD,
+            "n_double_elim_weeks_checked": n_weeks_checked,
+            "total_samples_checked": total_samples_checked,
+            "min_check_rate_double_elim": round(min_check_rate, 6) if not np.isnan(min_check_rate) else None,
+            "median_check_rate_double_elim": round(median_check_rate, 6) if not np.isnan(median_check_rate) else None,
+            "q10_check_rate_double_elim": round(q10_check_rate, 6) if not np.isnan(q10_check_rate) else None,
+            "hard3_structural_pass": hard3_structural_pass,
+        }
+        (OUTPUT_DIR / "audit_double_elim_structural_check.json").write_text(json.dumps(structural_check, indent=2), encoding="utf-8")
+        log(f"Hard-3 Structural: min_check_rate={min_check_rate:.6f}, pass={hard3_structural_pass}" if not np.isnan(min_check_rate) else "Hard-3 Structural: no double-elim data")
 
         tier_records = []
         for _, row in week_metrics_df.iterrows():
