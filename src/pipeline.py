@@ -829,7 +829,7 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
         
         # Runtime with error band
         ax = axes[0, 0]
-        ax.plot(x, agg_df["runtime_mean"], marker="o", color=COLOR_PRIMARY, label="Mean")
+        ax.plot(x, agg_df["runtime_mean"], marker="o", markersize=4.5, color=COLOR_PRIMARY, label="Mean")
         ax.fill_between(x, 
                         agg_df["runtime_mean"] - agg_df["runtime_std"],
                         agg_df["runtime_mean"] + agg_df["runtime_std"],
@@ -840,7 +840,7 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
         
         # Mean HDI with error band
         ax = axes[0, 1]
-        ax.plot(x, agg_df["hdi_mean"], marker="o", color=COLOR_ACCENT, label="Mean")
+        ax.plot(x, agg_df["hdi_mean"], marker="o", markersize=4.5, color=COLOR_ACCENT, label="Mean")
         ax.fill_between(x,
                         agg_df["hdi_mean"] - agg_df["hdi_std"],
                         agg_df["hdi_mean"] + agg_df["hdi_std"],
@@ -851,7 +851,7 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
         
         # Stability with error band
         ax = axes[1, 0]
-        ax.plot(x, agg_df["stability_mean"], marker="o", color=COLOR_PRIMARY_DARK, label="Mean")
+        ax.plot(x, agg_df["stability_mean"], marker="o", markersize=4.5, color=COLOR_PRIMARY_DARK, label="Mean")
         ax.fill_between(x,
                         agg_df["stability_mean"] - agg_df["stability_std"],
                         agg_df["stability_mean"] + agg_df["stability_std"],
@@ -862,7 +862,7 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
         
         # Fairness with error band
         ax = axes[1, 1]
-        ax.plot(x, agg_df["fairness_mean"], marker="o", color=COLOR_GRAY, label="Mean")
+        ax.plot(x, agg_df["fairness_mean"], marker="o", markersize=4.5, color=COLOR_GRAY, label="Mean")
         ax.fill_between(x,
                         agg_df["fairness_mean"] - agg_df["fairness_std"],
                         agg_df["fairness_mean"] + agg_df["fairness_std"],
@@ -901,22 +901,22 @@ def plot_scale_benchmark(df: pd.DataFrame) -> None:
         else:
             elbow_x = None
 
-        axes[0, 0].plot(x, df["runtime_sec"], marker="o", color=COLOR_PRIMARY)
+        axes[0, 0].plot(x, df["runtime_sec"], marker="o", markersize=4.5, color=COLOR_PRIMARY)
         axes[0, 0].set_title("Runtime vs Scale")
         axes[0, 0].set_xlabel("N_PROPOSALS")
         axes[0, 0].set_ylabel("Seconds")
 
-        axes[0, 1].plot(x, df["mean_hdi"], marker="o", color=COLOR_ACCENT)
+        axes[0, 1].plot(x, df["mean_hdi"], marker="o", markersize=4.5, color=COLOR_ACCENT)
         axes[0, 1].set_title("Error (Mean HDI) vs Scale")
         axes[0, 1].set_xlabel("N_PROPOSALS")
         axes[0, 1].set_ylabel("Mean HDI")
 
-        axes[1, 0].plot(x, df["stability_daws"], marker="o", color=COLOR_PRIMARY_DARK)
+        axes[1, 0].plot(x, df["stability_daws"], marker="o", markersize=4.5, color=COLOR_PRIMARY_DARK)
         axes[1, 0].set_title("Stability (DAWS) vs Scale")
         axes[1, 0].set_xlabel("N_PROPOSALS")
         axes[1, 0].set_ylabel("Stability")
 
-        axes[1, 1].plot(x, df["fairness_daws"], marker="o", color=COLOR_GRAY)
+        axes[1, 1].plot(x, df["fairness_daws"], marker="o", markersize=4.5, color=COLOR_GRAY)
         axes[1, 1].set_title("Conflict index (Kendall tau) vs Scale")
         axes[1, 1].set_xlabel("N_PROPOSALS")
         axes[1, 1].set_ylabel("Tau")
@@ -2877,6 +2877,13 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         common_idx = fe_j_series.index.intersection(fe_f_series.index)
         x = fe_j_series[common_idx]
         y = fe_f_series[common_idx]
+        feature_effects = pd.DataFrame({
+            "feature": common_idx,
+            "effect_j": x.to_numpy(),
+            "effect_f": y.to_numpy(),
+        })
+        if save_outputs:
+            feature_effects.to_csv(OUTPUT_DIR / "feature_effects.csv", index=False, encoding="utf-8")
         plt.figure(figsize=(5.4, 4.2))
         plt.scatter(x, y, color=COLOR_PRIMARY)
         lim = max(abs(x).max(), abs(y).max())
@@ -2937,6 +2944,58 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         plt.title("Judge-save decision curve")
         plt.savefig(FIG_DIR / "fig_judgesave_curve.pdf")
         plt.close()
+
+        # Conflict-week judge-score differences (for calibration context)
+        conflict_diffs = []
+        for (season, week), wdf in season_week_groups:
+            final_week = int(season_max_week.get(int(season), int(week)))
+            if int(week) >= final_week:
+                continue
+            active_df = wdf[wdf["active"]].copy()
+            if len(active_df) == 0:
+                continue
+            key = (int(season), int(week))
+            samples = samples_cache.get(key)
+            if samples is None or len(samples) == 0:
+                continue
+            if len(samples) > MAX_SAMPLES_PER_WEEK:
+                idx = RNG.choice(len(samples), size=MAX_SAMPLES_PER_WEEK, replace=False)
+                samples = samples[idx]
+
+            j_share = active_df["judge_share"].to_numpy()
+            j_scores = active_df["judge_total"].to_numpy()
+            j_rank = active_df["judge_share"].rank(ascending=False, method="average").to_numpy()
+            j_share_matrix = np.tile(j_share, (len(samples), 1))
+            comb_percent = ALPHA_PERCENT * j_share_matrix + (1 - ALPHA_PERCENT) * samples
+            elim_p = np.argmin(comb_percent, axis=1)
+            fan_rank = np.argsort(np.argsort(-samples, axis=1), axis=1) + 1
+            comb_rank = fan_rank + np.tile(j_rank, (len(samples), 1))
+            elim_r = np.argmax(comb_rank, axis=1)
+            conflict_mask = elim_p != elim_r
+            if not np.any(conflict_mask):
+                continue
+            p_idx = elim_p[conflict_mask]
+            r_idx = elim_r[conflict_mask]
+            diff = j_scores[r_idx] - j_scores[p_idx]
+            conflict_diffs.append(diff)
+
+        if conflict_diffs:
+            conflict_diffs = np.concatenate(conflict_diffs)
+            conflict_diffs = conflict_diffs[np.isfinite(conflict_diffs)]
+            if conflict_diffs.size > 0:
+                plt.figure(figsize=(5.0, 3.4))
+                plt.hist(conflict_diffs, bins=25, color=COLOR_PRIMARY, alpha=0.75, density=True)
+                plt.axvline(0, color=COLOR_GRAY, linestyle="--", linewidth=1)
+                plt.xlabel("Judge score diff (r - p)")
+                plt.ylabel("Density")
+                plt.title("Conflict-week judge-score differences")
+                plt.tight_layout()
+                plt.savefig(FIG_DIR / "fig_judgesave_conflict_diff.pdf")
+                plt.close()
+            else:
+                log("No finite conflict diffs for judge-save histogram.")
+        else:
+            log("No conflict diffs found for judge-save histogram.")
     
         # ========== Hard-7: Beta 敏感性分析（仅冲突周统计）==========
         # 口径声明：
@@ -3039,14 +3098,24 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             axes[0].legend(frameon=False, fontsize=8)
     
             axes[1].plot(beta_df["agency_deviation"], beta_df["integrity"], marker="o", color=COLOR_PRIMARY)
-            for _, row in beta_df.iterrows():
+            label_offsets = [(6, 6), (6, -8), (-10, 6), (-10, -8), (0, 10), (10, 0), (-10, 0)]
+            for idx, row in beta_df.sort_values("beta").reset_index(drop=True).iterrows():
+                dx, dy = label_offsets[idx % len(label_offsets)]
                 axes[1].annotate(f"β={row['beta']:.0f}", (row["agency_deviation"], row["integrity"]),
-                                 textcoords="offset points", xytext=(4, 4), fontsize=8)
+                                 textcoords="offset points", xytext=(dx, dy), fontsize=8)
             axes[1].set_xlabel("Agency deviation (conflict weeks)")
             axes[1].set_ylabel("Integrity (conflict weeks)")
             axes[1].set_title("Trade-off under β")
-            axes[1].set_xlim(0, 1)
-            axes[1].set_ylim(0, 1)
+            x_vals = beta_df["agency_deviation"].to_numpy()
+            y_vals = beta_df["integrity"].to_numpy()
+            x_min, x_max = float(np.nanmin(x_vals)), float(np.nanmax(x_vals))
+            y_min, y_max = float(np.nanmin(y_vals)), float(np.nanmax(y_vals))
+            x_range = max(x_max - x_min, 1e-3)
+            y_range = max(y_max - y_min, 1e-3)
+            pad_x = max(0.02, 0.35 * x_range)
+            pad_y = max(0.02, 0.35 * y_range)
+            axes[1].set_xlim(max(0.0, x_min - pad_x), min(1.0, x_max + pad_x))
+            axes[1].set_ylim(max(0.0, y_min - pad_y), min(1.0, y_max + pad_y))
             plt.tight_layout()
             plt.savefig(FIG_DIR / "fig_beta_sensitivity.pdf")
             plt.close(fig)

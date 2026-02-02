@@ -1,0 +1,104 @@
+\begin{thebibliography}{10}
+
+\bibitem{enli2011dancing}
+Gunn~Sara Enli and Karoline~A. Ihleb{\ae}k.
+\newblock `dancing with the audience': Administrating vote-ins in public and commercial broadcasting.
+\newblock {\em Media, Culture \& Society}, 33(6):953--962, 2011.
+
+\bibitem{dwts-season3-wiki}
+{Wikipedia contributors}.
+\newblock Dancing with the stars (american tv series) season 3, 2026.
+
+\bibitem{dwts-season28-wiki}
+{Wikipedia contributors}.
+\newblock Dancing with the stars (american tv series) season 28, 2026.
+
+\bibitem{dwts-jerryrice-espn}
+Michael Rothstein.
+\newblock Calvin johnson meets jerry rice for 1st time on {DWTS}, 2016.
+
+\bibitem{dwts-bobbybones-abcnews}
+Nicole Pelletiere.
+\newblock Dancing with the stars' season 27 champ bobby bones on his win: {We} did it one day at a time, 2018.
+
+\bibitem{smith1984}
+Robert~L. Smith.
+\newblock Efficient monte carlo procedures for generating points uniformly distributed over bounded regions.
+\newblock {\em Operations Research}, 32(6):1296--1308, 1984.
+
+\bibitem{belisle1993hitandrun}
+Claude J.~P. B{\'e}lisle, H.~Edwin Romeijn, and Robert~L. Smith.
+\newblock Hit-and-run algorithms for generating multivariate distributions.
+\newblock {\em Mathematics of Operations Research}, 18(2):255--266, 1993.
+
+\bibitem{lovasz2006}
+Laszlo Lovasz and Santosh~S. Vempala.
+\newblock Hit-and-run from a corner.
+\newblock {\em SIAM Journal on Computing}, 35(4):985--1005, 2006.
+
+\bibitem{jaynes1957}
+E.~T. Jaynes.
+\newblock Information theory and statistical mechanics.
+\newblock {\em Physical Review}, 106(4):620--630, 1957.
+
+\bibitem{jaynes2003}
+E.~T. Jaynes.
+\newblock {\em Probability Theory: The Logic of Science}.
+\newblock Cambridge University Press, 2003.
+
+\bibitem{gelman2013}
+Andrew Gelman, John~B. Carlin, Hal~S. Stern, David~B. Dunson, Aki Vehtari, and Donald~B. Rubin.
+\newblock {\em Bayesian Data Analysis}.
+\newblock CRC Press, 3 edition, 2013.
+
+\bibitem{kruschke2015}
+John~K. Kruschke.
+\newblock {\em Doing Bayesian Data Analysis: A Tutorial with R, JAGS, and Stan}.
+\newblock Academic Press, 2 edition, 2015.
+
+\bibitem{moulin1988}
+Herve Moulin.
+\newblock {\em Axioms of Cooperative Decision Making}.
+\newblock Cambridge University Press, 1988.
+
+\bibitem{brams2002voting}
+Steven~J. Brams and Peter~C. Fishburn.
+\newblock Voting procedures.
+\newblock In Kenneth~J. Arrow, Amartya~K. Sen, and Kotaro Suzumura, editors, {\em Handbook of Social Choice and Welfare, Volume 1}, chapter~4, pages 173--236. North-Holland, Amsterdam, 2002.
+
+\bibitem{procaccia2006distortion}
+Ariel~D. Procaccia and Jeffrey~S. Rosenschein.
+\newblock The distortion of cardinal preferences in voting.
+\newblock In {\em Proceedings of the 10th International Workshop on Cooperative Information Agents (CIA~2006)}, volume 4149 of {\em Lecture Notes in Computer Science}, pages 317--331. Springer, 2006.
+
+\bibitem{kendall1938}
+M.~G. Kendall.
+\newblock A new measure of rank correlation.
+\newblock {\em Biometrika}, 30(1-2):81--93, 1938.
+
+\bibitem{frigyik2010dirichlet}
+Bela~A. Frigyik, Amol Kapila, and Maya~R. Gupta.
+\newblock Introduction to the dirichlet distribution and related processes.
+\newblock Technical Report UWEETR-2010-0006, University of Washington, Department of Electrical Engineering, 2010.
+
+\bibitem{hyndman1996hdr}
+Rob~J. Hyndman.
+\newblock Computing and graphing highest density regions.
+\newblock {\em The American Statistician}, 50(2):120--126, 1996.
+
+\bibitem{gelman2007}
+Andrew Gelman and Jennifer Hill.
+\newblock {\em Data Analysis Using Regression and Multilevel/Hierarchical Models}.
+\newblock Cambridge University Press, 2007.
+
+\bibitem{friedman2001}
+Jerome~H. Friedman.
+\newblock Greedy function approximation: A gradient boosting machine.
+\newblock {\em The Annals of Statistics}, 29(5):1189--1232, 2001.
+
+\bibitem{fawcett2006}
+Tom Fawcett.
+\newblock An introduction to {ROC} analysis.
+\newblock {\em Pattern Recognition Letters}, 27(8):861--874, 2006.
+
+\end{thebibliography}
