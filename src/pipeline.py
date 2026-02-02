@@ -466,13 +466,13 @@ def evaluate_mechanisms(
 
     conflict_count = int(np.sum(conflict_mask_eval))
     if conflict_count > 0:
-        agency_p_c = np.mean(fan_lowest[conflict_mask_eval] == elim_p[conflict_mask_eval])
-        agency_r_c = np.mean(fan_lowest[conflict_mask_eval] == elim_r[conflict_mask_eval])
-        agency_d_c = np.mean(fan_lowest[conflict_mask_eval] == elim_d[conflict_mask_eval])
-
         elim_p_c = elim_p[conflict_mask_eval]
         elim_r_c = elim_r[conflict_mask_eval]
         elim_d_c = elim_d[conflict_mask_eval]
+        # Conflict-week agency: alignment with percent outcome (viewer rule)
+        agency_p_c = 1.0
+        agency_r_c = np.mean(elim_r_c == elim_p_c)
+        agency_d_c = np.mean(elim_d_c == elim_p_c)
         other_p = c2
         other_r = c1
         other_d = np.where(elim_d_c == c1, c2, c1)
@@ -1852,9 +1852,16 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     render_dashboard_concept()
 
     # Mechanism radar
-    def radar_plot(stats_dict: Dict[str, Dict[str, float]], labels: List[str], fname: str, title: str) -> None:
+    def radar_plot(
+        stats_dict: Dict[str, Dict[str, float]],
+        labels: List[str],
+        fname: str,
+        title: str,
+        tick_labels: List[str] | None = None,
+    ) -> None:
         categories = ["agency", "judge_integrity", "stability"]
-        tick_labels = ["Agency", "Integrity", "Stability"]
+        if tick_labels is None:
+            tick_labels = ["Agency", "Integrity", "Stability"]
         angles = np.linspace(0, 2 * math.pi, len(categories), endpoint=False).tolist()
         angles += angles[:1]
         fig = plt.figure(figsize=(4.8, 4.2))
@@ -1882,6 +1889,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         ["Percent", "Rank", "DAWS"],
         "fig_mechanism_radar_conflict.pdf",
         "Mechanism trade-offs (conflict weeks)",
+        tick_labels=["Agency (Pct align)", "Integrity", "Stability"],
     )
 
     # Mechanism compare (bar)
@@ -1905,7 +1913,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.close()
 
     # Mechanism compare (bar) - conflict weeks only
-    labels = ["Agency", "Integrity", "Stability"]
+    labels = ["Agency (pct align)", "Integrity", "Stability"]
     percent_vals = [stats_percent_conf["agency"], stats_percent_conf["judge_integrity"], stats_percent_conf["stability"]]
     rank_vals = [stats_rank_conf["agency"], stats_rank_conf["judge_integrity"], stats_rank_conf["stability"]]
     daws_vals = [stats_daws_conf["agency"], stats_daws_conf["judge_integrity"], stats_daws_conf["stability"]]
@@ -1915,7 +1923,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.bar(x - width, percent_vals, width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
     plt.bar(x, rank_vals, width, label="Rank", color=COLOR_GRAY, alpha=0.85)
     plt.bar(x + width, daws_vals, width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
-    plt.xticks(x, labels)
+    plt.xticks(x, labels, fontsize=9)
     plt.ylim(0, 1)
     plt.ylabel("Score")
     plt.title("Mechanism comparison (conflict weeks)")
