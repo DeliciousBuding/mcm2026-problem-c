@@ -1874,25 +1874,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         angles += angles[:1]
         fig = plt.figure(figsize=(4.8, 4.2))
         ax = plt.subplot(111, polar=True)
-        color_map = {"Percent": COLOR_PRIMARY, "Rank": COLOR_WARNING, "DAWS": COLOR_ACCENT}
-        style_map = {"Percent": "-", "Rank": "--", "DAWS": "-"}
-        marker_map = {"Percent": "o", "Rank": "^", "DAWS": "s"}
-        z_map = {"Percent": 3, "DAWS": 2, "Rank": 1}
         for label in labels:
             values = [stats_dict[label][c] for c in categories]
             values += values[:1]
-            ax.plot(
-                angles,
-                values,
-                label=label,
-                color=color_map.get(label, None),
-                linestyle=style_map.get(label, "-"),
-                marker=marker_map.get(label, None),
-                markersize=3.0,
-                linewidth=2.0,
-                zorder=z_map.get(label, 1),
-            )
-            ax.fill(angles, values, alpha=0.08, color=color_map.get(label, None), zorder=0)
+            ax.plot(angles, values, label=label)
+            ax.fill(angles, values, alpha=0.10)
         ax.set_thetagrids(np.degrees(angles[:-1]), tick_labels)
         ax.set_title(title)
         ax.legend(loc="upper right", bbox_to_anchor=(1.15, 1.05))
