@@ -374,20 +374,21 @@ def evaluate_mechanisms(
     a_idx = bottom_two[:, 0]
     b_idx = bottom_two[:, 1]
     diff = j_scores[b_idx] - j_scores[a_idx]
-    p_elim_a = 1 / (1 + np.exp(JUDGESAVE_BETA * diff))
+    p_elim_a = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff))
     rand_u = rng.random(m)
     elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
 
     conflict_mask = elim_p != elim_r
-    c1 = elim_p[conflict_mask] if np.any(conflict_mask) else np.array([], dtype=int)
-    c2 = elim_r[conflict_mask] if np.any(conflict_mask) else np.array([], dtype=int)
+    conflict_mask_eval = conflict_mask if daws_tier != "Red" else np.zeros_like(conflict_mask, dtype=bool)
+    c1 = elim_p[conflict_mask_eval] if np.any(conflict_mask_eval) else np.array([], dtype=int)
+    c2 = elim_r[conflict_mask_eval] if np.any(conflict_mask_eval) else np.array([], dtype=int)
     if daws_tier == "Red":
         elim_d = np.argmin(samples, axis=1)
     else:
         elim_d = elim_p.copy()
         if np.any(conflict_mask):
             diff_c = j_scores[c2] - j_scores[c1]
-            p_elim_c1 = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_c))
+            p_elim_c1 = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_c))
             rand_c = rng.random(np.sum(conflict_mask))
             elim_d[conflict_mask] = np.where(rand_c < p_elim_c1, c1, c2)
 
@@ -441,7 +442,7 @@ def evaluate_mechanisms(
     a_n = bottom_two_noise[:, 0]
     b_n = bottom_two_noise[:, 1]
     diff_n = j_scores[b_n] - j_scores[a_n]
-    p_elim_a_n = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_n))
+    p_elim_a_n = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_n))
     rand_u_n = rng.random(m)
     elim_noise_s = np.where(rand_u_n < p_elim_a_n, a_n, b_n)
 
@@ -454,7 +455,7 @@ def evaluate_mechanisms(
             c1_n = elim_noise_p[conflict_noise]
             c2_n = elim_noise_r[conflict_noise]
             diff_cn = j_scores[c2_n] - j_scores[c1_n]
-            p_elim_c1n = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_cn))
+            p_elim_c1n = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_cn))
             rand_cn = rng.random(np.sum(conflict_noise))
             elim_noise_d[conflict_noise] = np.where(rand_cn < p_elim_c1n, c1_n, c2_n)
 
@@ -463,15 +464,15 @@ def evaluate_mechanisms(
     instability_s = np.mean(elim_s != elim_noise_s)
     instability_d = np.mean(elim_d != elim_noise_d)
 
-    conflict_count = int(np.sum(conflict_mask))
+    conflict_count = int(np.sum(conflict_mask_eval))
     if conflict_count > 0:
-        agency_p_c = np.mean(fan_lowest[conflict_mask] == elim_p[conflict_mask])
-        agency_r_c = np.mean(fan_lowest[conflict_mask] == elim_r[conflict_mask])
-        agency_d_c = np.mean(fan_lowest[conflict_mask] == elim_d[conflict_mask])
+        agency_p_c = np.mean(fan_lowest[conflict_mask_eval] == elim_p[conflict_mask_eval])
+        agency_r_c = np.mean(fan_lowest[conflict_mask_eval] == elim_r[conflict_mask_eval])
+        agency_d_c = np.mean(fan_lowest[conflict_mask_eval] == elim_d[conflict_mask_eval])
 
-        elim_p_c = elim_p[conflict_mask]
-        elim_r_c = elim_r[conflict_mask]
-        elim_d_c = elim_d[conflict_mask]
+        elim_p_c = elim_p[conflict_mask_eval]
+        elim_r_c = elim_r[conflict_mask_eval]
+        elim_d_c = elim_d[conflict_mask_eval]
         other_p = c2
         other_r = c1
         other_d = np.where(elim_d_c == c1, c2, c1)
@@ -979,7 +980,7 @@ def mechanism_judge_save(v: np.ndarray, week_df: pd.DataFrame, beta: float) -> L
     a, b = bottom_two
     j_scores = active_df["judge_total"].to_numpy()
     diff = j_scores[b] - j_scores[a]
-    p_elim_a = 1 / (1 + math.exp(beta * diff))
+    p_elim_a = 1 / (1 + math.exp(-beta * diff))
     return [int(a if RNG.random() < p_elim_a else b)]
 
 
@@ -2054,7 +2055,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # Judge-save curve (示意)
     xs = np.linspace(-10, 10, 200)
-    ys = 1 / (1 + np.exp(JUDGESAVE_BETA * xs))
+    ys = 1 / (1 + np.exp(-JUDGESAVE_BETA * xs))
     plt.figure(figsize=(5.0, 3.4))
     plt.plot(xs, ys, color=COLOR_PRIMARY)
     plt.xlabel("Judge score difference")
@@ -2105,7 +2106,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             p_idx = elim_p[conflict_mask]
             r_idx = elim_r[conflict_mask]
             diff = j_scores[r_idx] - j_scores[p_idx]
-            p_elim_p = 1 / (1 + np.exp(beta * diff))
+            p_elim_p = 1 / (1 + np.exp(-beta * diff))
             j_p = j_scores[p_idx]
             j_r = j_scores[r_idx]
             higher_is_p = j_p >= j_r
@@ -2130,7 +2131,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.4))
         diff_grid = np.linspace(-3, 3, 240)
         for beta in betas:
-            axes[0].plot(diff_grid, 1 / (1 + np.exp(beta * diff_grid)), label=f"β={beta:.0f}")
+            axes[0].plot(diff_grid, 1 / (1 + np.exp(-beta * diff_grid)), label=f"β={beta:.0f}")
         axes[0].set_xlabel("Judge score diff (r − p)")
         axes[0].set_ylabel("P(eliminate percent candidate)")
         axes[0].set_title("Decision sensitivity (logit)")
@@ -2247,7 +2248,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         a_idx = bottom_two[:, 0]
         b_idx = bottom_two[:, 1]
         diff = j_scores[b_idx] - j_scores[a_idx]
-        p_elim_a = 1 / (1 + np.exp(JUDGESAVE_BETA * diff))
+        p_elim_a = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff))
         prob_s = np.zeros(n)
         for i in range(n):
             mask_a = (a_idx == i)
@@ -2272,7 +2273,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 c1 = elim_p[conflict_mask]
                 c2 = elim_r[conflict_mask]
                 diff_c = j_scores[c2] - j_scores[c1]
-                p_elim_c1 = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_c))
+                p_elim_c1 = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_c))
                 np.add.at(prob_d, c1, p_elim_c1)
                 np.add.at(prob_d, c2, 1 - p_elim_c1)
             prob_d = prob_d / m
@@ -2445,7 +2446,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                         elim_pred = elim_p
                     else:
                         diff = j_scores[elim_r] - j_scores[elim_p]
-                        p_elim_p = 1 / (1 + math.exp(JUDGESAVE_BETA * diff))
+                        p_elim_p = 1 / (1 + math.exp(-JUDGESAVE_BETA * diff))
                         elim_pred = elim_p if p_elim_p >= 0.5 else elim_r
             if elim_pred not in elim_idx:
                 elim_mismatch += 1
