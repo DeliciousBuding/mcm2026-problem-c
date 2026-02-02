@@ -1,6 +1,6 @@
 beta,integrity,agency_deviation,conflict_samples,integrity_pass,note
-2.0,0.9633923874716145,0.8452402232668546,7540,True,policy_parameter (not calibrated estimate)
-4.0,0.9895759192239975,0.864545288606672,7492,True,policy_parameter (not calibrated estimate)
-6.0,0.9943753825900046,0.8776518596820854,7501,True,policy_parameter (not calibrated estimate)
-8.0,0.9951857715983649,0.8783554422954507,7453,True,policy_parameter (not calibrated estimate)
-10.0,0.9955894327270152,0.8722343105194443,7441,True,policy_parameter (not calibrated estimate)
+2.0,0.9647386311887556,0.8531475403731442,8299,True,policy_parameter (not calibrated estimate)
+4.0,0.9890463722951999,0.8795473143417709,8316,True,policy_parameter (not calibrated estimate)
+6.0,0.9945835155948435,0.8811065766056102,8312,True,policy_parameter (not calibrated estimate)
+8.0,0.995777686932379,0.8740199584312344,8309,True,policy_parameter (not calibrated estimate)
+10.0,0.995652726266642,0.876050749836135,8260,True,policy_parameter (not calibrated estimate)
