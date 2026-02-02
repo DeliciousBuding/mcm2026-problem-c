@@ -232,10 +232,12 @@ Fan ranks $r^F_i$ are assigned by binary variables $x_{ik}$:
 \begin{equation}
 \sum_k x_{ik}=1,\quad \sum_i x_{ik}=1,\quad r^F_i=\sum_k kx_{ik}.
 \end{equation}
-Rank-share linking (enforced by big-$M$ linearization):
+Rank-share linking (weak ordering):
 \begin{equation}
- r^F_i<r^F_j \Rightarrow v_i\ge v_j+\Delta.
+ r^F_i<r^F_j \Rightarrow v_i\ge v_j.
 \end{equation}
+\textit{Note: A formal $\Delta$ min-gap can be introduced for theoretical analysis, but our implementation \textbf{does not enforce any min-gap}; only the bottom-$k$ ordering constraint is used ($\max(\text{score}_E)\le\min(\text{score}_S)+\epsilon$, $\epsilon=10^{-6}$). See Appendix~\ref{app:lp-scope}.}
+
 Combined rank and elimination:
 \begin{equation}
  R_i=r^J_i+r^F_i,\quad R_{E_t}\ge R_i\ \forall i\ne E_t.

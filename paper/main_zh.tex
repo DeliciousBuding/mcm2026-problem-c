@@ -232,10 +232,12 @@ DAWS 稳定性提升 & +\MetricDAWSImprove\% \\
 \begin{equation}
 \sum_k x_{ik}=1,\quad \sum_i x_{ik}=1,\quad r^F_i=\sum_k kx_{ik}.
 \end{equation}
-排名与 share 关系：
+排名与 share 关系（弱序约束）：
 \begin{equation}
- r^F_i<r^F_j \Rightarrow v_i\ge v_j+\Delta.
+ r^F_i<r^F_j \Rightarrow v_i\ge v_j.
 \end{equation}
+\textit{注：形式化中可引入最小间隔 $\Delta$，但本文实现\textbf{不强加 min-gap}，仅使用 bottom-$k$ 排序约束（$\max(\text{score}_E)\le\min(\text{score}_S)+\epsilon$，$\epsilon=10^{-6}$），详见附录~\ref{app:lp-scope}。}
+
 组合排名与淘汰：
 \begin{equation}
  R_i=r^J_i+r^F_i,\quad R_{E_t}\ge R_i\ \forall i\ne E_t.
@@ -303,7 +305,7 @@ Judge-save 赛季中，bottom-two 由 $R_i$ 决定，评委以参数 $\beta$ 的
 
 \subsection{工程近似与严格校验}
 \takeaway{工程实现采用快速近似采样，并通过严格约束校验保证结论稳定。}
-理论模型可用 LP/MILP 形式化，但实际工程管线采用快速 Dirichlet 提案与约束筛选以保证速度。为此，我们使用严格可行性（完整淘汰约束）对同一批候选样本进行再筛选，并比较后验摘要。
+理论模型可用 LP/MILP 形式化，但实际工程管线采用快速 Dirichlet 提案与约束筛选以保证速度。\textbf{LP/MILP 仅用于边界/松弛的辅助诊断，不参与采样、可行性筛选或后验估计}（详见附录~\ref{app:lp-scope}）。为此，我们使用严格可行性（完整淘汰约束）对同一批候选样本进行再筛选，并比较后验摘要。双淘汰周的严格可行性验证详见附录~\ref{app:double-elim}。
 \begin{table}[H]
 \centering
 \begin{tabular}{@{}ll@{}}
@@ -540,6 +542,7 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \item \textbf{可读结论：} 不确定性集中在少数周，其余周可识别性较高。
 \item \textbf{机制影响：} Rank 聚合提高翻转概率；DAWS 提升能动性但稳定性略有代价（见图~\ref{fig:counterfactual-risk} 与图~\ref{fig:daws-trigger}）。
 \item \textbf{落地建议：} 公布冲突触发与披露规则及 judge-save 规则以提升透明度。
+\item \textbf{方法局限：} 双淘汰周可行域较小（接受率 $R$ 约为单淘汰周的 $30\%$），符合组合概率预期（附录~\ref{app:double-elim}）；LP/MILP 仅作诊断用途（附录~\ref{app:lp-scope}）。
 \end{itemize}
 
 \clearpage
@@ -554,6 +557,40 @@ U(\text{Save }A)=w_1\cdot \text{Skill}_A + w_2\cdot \text{Ratings}_A - \text{Bac
 \end{figure}
 
 % DAWS 参数扫描已移除，最终版采用冲突触发配置。
+
+\section{双淘汰周可行性验证}\label{app:double-elim}
+本附录报告双淘汰周（$k=2$）与单淘汰周（$k=1$）的可行性校验结果。
+
+\paragraph{预注册 Smoke Test（R 检验）}
+我们预注册接受率比值 $R = \text{median}(\text{accept\_rate}_{k=2}) / \text{median}(\text{accept\_rate}_{k=1})$，预期范围 $[0.5, 2.0]$。实测 $R = 0.3006$，\textbf{未通过}。该结果保留而非调整阈值，因为 $R < 0.5$ 是数学正常行为：双淘汰约束更严，可行域更小。
+
+\paragraph{理论基线对齐}
+基于组合概率：$R_{\text{baseline}} = 2/(n-1)$，其中 $n$ 为活跃选手数。对于中位数 $n=8$，$R_{\text{baseline}} = 0.2857$。实测 $R / R_{\text{baseline}} = 1.052 \approx 1$，说明 $R$ 符合理论预期而非实现缺陷。
+
+\paragraph{结构性复核（主证据）}
+为避免循环自证，我们对接受样本显式重算 combined score 和残差（$\text{residual} = \max(\text{score}_E) - \min(\text{score}_S)$），\textbf{不调用} \texttt{strict\_feasible\_mask}。结果：
+\begin{itemize}[leftmargin=2em]
+\item 双淘汰周：total=31, valid=3, checked=3, min\_check\_rate=1.0 \checkmark
+\item 单淘汰周：total=232, valid=214, checked=214, min\_check\_rate=1.0 \checkmark
+\end{itemize}
+所有接受样本均通过独立复核，验证约束编码正确。
+
+\section{LP/MILP 用途声明}\label{app:lp-scope}
+本附录明确 LP/MILP 在本文中的定位：\textbf{仅作为辅助诊断工具}，不参与主推断流程。
+
+\paragraph{主模型实现}
+MaxEnt Dirichlet 采样 + \texttt{strict\_feasible\_mask()} 约束筛选。后验为样本近似，非 LP 优化解。
+
+\paragraph{LP/MILP 用途（诊断）}
+\begin{itemize}[leftmargin=2em]
+\item \texttt{slack\_cache}：审计元数据（约束张力指示）
+\item bounds visualization：参考用，非主结论
+\end{itemize}
+
+\paragraph{LP/MILP 不用于}
+采样过滤、可行性检查、后验估计、机制指标计算。当前实现为哑函数（返回固定 slack=0.001）。
+
+详见产物 \texttt{audit\_lp\_milp\_scope.json}。
 
 \section{预测校准}\label{app:auc}
 本附录提供 GBDT 前向链式验证的 AUC 结果，作为协变量有效性的鲁棒性检验。
