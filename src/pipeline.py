@@ -726,7 +726,7 @@ def synthetic_data_validation(
 
 def render_dashboard_concept() -> None:
     """绘制制片人仪表盘概念图（用于论文展示）。"""
-    fig, ax = plt.subplots(figsize=(7.2, 4.2))
+    fig, ax = plt.subplots(figsize=(8.2, 4.6))
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
@@ -742,7 +742,7 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(panel)
-    ax.text(0.05, 0.92, "Producer Dashboard", fontsize=12, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.05, 0.92, "Producer Dashboard", fontsize=13, fontweight="bold", color=COLOR_PRIMARY_DARK)
 
     # 状态区
     status_box = FancyBboxPatch(
@@ -755,17 +755,19 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(status_box)
-    ax.text(0.07, 0.79, "Signal V", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
-    ax.text(0.07, 0.74, "Monitoring Only (No Override)", fontsize=7, color=COLOR_GRAY)
+    ax.text(0.07, 0.79, "Signal V", fontsize=10, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.07, 0.74, "Monitoring Only (No Override)", fontsize=8, color=COLOR_GRAY)
     lights = [("Green", "#7FBF7B"), ("Yellow", "#F1C232"), ("Red", COLOR_WARNING)]
     y_pos = [0.67, 0.55, 0.43]
     for (label, color), y in zip(lights, y_pos):
         active = (label == "Yellow")
         face = color if active else "#DDDDDD"
-        circle = Circle((0.11, y), 0.035, facecolor=face, edgecolor="#666666", linewidth=1.0)
+        circle = Circle((0.11, y), 0.038, facecolor=face, edgecolor="#666666", linewidth=1.0)
         ax.add_patch(circle)
-    ax.text(0.19, 0.55, "Audit Level: Yellow", fontsize=9, color=COLOR_WARNING, fontweight="bold")
-    ax.text(0.08, 0.28, "Disclosure: Warning", fontsize=8, color=COLOR_GRAY)
+        ax.text(0.16, y, label, fontsize=8, color=COLOR_GRAY, va="center")
+    ax.text(0.19, 0.55, "Audit Level: Yellow", fontsize=10, color=COLOR_WARNING, fontweight="bold")
+    ax.text(0.08, 0.30, "Disclosure: Warning", fontsize=8.5, color=COLOR_GRAY)
+    ax.text(0.08, 0.24, "Confidence: Medium", fontsize=8.5, color=COLOR_GRAY)
 
     # 审计区
     audit_box = FancyBboxPatch(
@@ -778,7 +780,7 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(audit_box)
-    ax.text(0.35, 0.79, "Audit Window (HDI)", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.35, 0.79, "Audit Window (HDI)", fontsize=10, fontweight="bold", color=COLOR_PRIMARY_DARK)
     for i in range(5):
         y = 0.69 - i * 0.11
         ax.add_line(plt.Line2D([0.36, 0.68], [y, y], color="#CCCCCC", linewidth=3))
@@ -787,7 +789,7 @@ def render_dashboard_concept() -> None:
         ax.add_patch(Rectangle((band_x, y - 0.015), band_w, 0.03, facecolor=COLOR_PRIMARY, alpha=0.35, edgecolor="none"))
         if i == 1:
             ax.add_patch(Rectangle((band_x, y - 0.018), band_w, 0.036, facecolor="none", edgecolor=COLOR_WARNING, linewidth=1.1))
-            ax.text(0.56, y + 0.025, "High Risk", fontsize=7, color=COLOR_WARNING)
+            ax.text(0.56, y + 0.027, "High Risk", fontsize=8, color=COLOR_WARNING)
 
     # 建议区
     rec_box = FancyBboxPatch(
@@ -800,8 +802,8 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(rec_box)
-    ax.text(0.75, 0.79, "Signal A", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
-    ax.text(0.75, 0.74, "Action Trigger", fontsize=7, color=COLOR_GRAY)
+    ax.text(0.75, 0.79, "Signal A", fontsize=10, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.75, 0.74, "Action Trigger", fontsize=8, color=COLOR_GRAY)
     rec_callout = FancyBboxPatch(
         (0.75, 0.50),
         0.18,
@@ -813,8 +815,8 @@ def render_dashboard_concept() -> None:
     )
     ax.add_patch(rec_callout)
     ax.text(0.84, 0.59, "Protocol\nStatus:\nJUDGE SAVE", ha="center", va="center",
-            fontsize=8, fontweight="bold", color=COLOR_WARNING)
-    ax.text(0.75, 0.32, "Triggered by Conflict (A=1)", fontsize=7.5, color=COLOR_WARNING)
+            fontsize=9, fontweight="bold", color=COLOR_WARNING)
+    ax.text(0.75, 0.32, "Triggered by Conflict (A=1)", fontsize=8, color=COLOR_WARNING)
 
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_dashboard_concept.pdf")
@@ -1632,6 +1634,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         wrongful_heat,
         cmap="cividis",
         cbar_kws={"label": "Wrongful prob"},
+        vmin=0.0,
+        vmax=1.0,
+        mask=np.isnan(wrongful_heat),
     )
     ax.set_xticks(np.arange(max_week) + 0.5)
     ax.set_xticklabels(np.arange(1, max_week + 1))
@@ -1641,12 +1646,6 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.ylabel("Season")
     plt.title("Wrongful elimination probability by week\n(blank cells = no elimination or missing data)")
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_wrongful_heatmap.pdf")
-    plt.close()
-    ax.set_yticklabels(np.arange(1, max_season + 1))
-    plt.xlabel("Week")
-    plt.ylabel("Season")
-    plt.title("Wrongful elimination probability by week")
     plt.savefig(FIG_DIR / "fig_wrongful_heatmap.pdf")
     plt.close()
 
@@ -1913,20 +1912,35 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     common_idx = fe_j_series.index.intersection(fe_f_series.index)
     x = fe_j_series[common_idx]
     y = fe_f_series[common_idx]
-    plt.figure(figsize=(5.0, 4.0))
+    plt.figure(figsize=(5.4, 4.2))
     plt.scatter(x, y, color=COLOR_PRIMARY)
     lim = max(abs(x).max(), abs(y).max())
     plt.plot([-lim, lim], [-lim, lim], color=COLOR_GRAY, linestyle="--")
     # annotate most divergent features
     dist = (y - x).abs()
     top_idx = dist.sort_values(ascending=False).head(5).index
+    label_offsets = {
+        "C(celebrity_industry)[T.Fitness Instructor]": (6, 8),
+        "C(celebrity_industry)[T.Politician]": (6, -8),
+    }
     for idx in top_idx:
+        raw_label = str(idx)
         label = (
-            str(idx)
+            raw_label
             .replace("celebrity_industry_", "ind:")
             .replace("ballroom_partner_", "pro:")
         )
-        plt.annotate(label, (x[idx], y[idx]), fontsize=7, alpha=0.8)
+        dx, dy = label_offsets.get(raw_label, (4, 4))
+        plt.annotate(
+            label,
+            (x[idx], y[idx]),
+            xytext=(dx, dy),
+            textcoords="offset points",
+            fontsize=7,
+            alpha=0.85,
+            ha="left",
+            va="center",
+        )
     plt.xlabel("Judge effect")
     plt.ylabel("Fan effect")
     plt.title("Feature impacts: judges vs fans")
