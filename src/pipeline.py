@@ -1550,9 +1550,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             log("WARNING: excluded_ratio >= 20%, season-level conclusions should be marked as exploratory")
 
         # ========== Hard-3 验收统计：双淘汰 vs 单淘汰接受率比 ==========
-        # 目的：检测编码错误（如把 k=2 当成 k=1 或无约束）
-        # 预期：双淘汰约束更紧，接受率应该更低，因此 R < 1.0 是正常的
-        # 验收标准：R > 0.1（排除极端编码错误）且 < 5.0（排除反向错误）
+        # 预注册验收标准（不可修改）：0.5 <= R <= 2.0
         double_elim_df = audit_meta_df[audit_meta_df["is_double_elim_week"] == 1] if "is_double_elim_week" in audit_meta_df else pd.DataFrame()
         single_elim_df = audit_meta_df[(audit_meta_df["eliminated_k"] == 1)] if "eliminated_k" in audit_meta_df else pd.DataFrame()
         
@@ -1564,8 +1562,8 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         else:
             R_double_single = float("nan")
         
-        # 验收标准：R > 0.1（双淘汰约束更紧是正常的）且 < 5.0
-        hard3_check_pass = bool(0.1 < R_double_single < 5.0) if not np.isnan(R_double_single) else False
+        # 预注册阈值（写死，不可修改）
+        hard3_check_pass = bool(0.5 <= R_double_single <= 2.0) if not np.isnan(R_double_single) else False
         
         double_elim_check = {
             "n_double_elim_weeks": len(double_elim_df),
@@ -1574,7 +1572,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "median_accept_rate_strict_single": round(median_single, 6) if not np.isnan(median_single) else None,
             "R_double_vs_single": round(R_double_single, 4) if not np.isnan(R_double_single) else None,
             "hard3_check_pass": hard3_check_pass,
-            "hard3_criterion": "0.1 < R < 5.0 (双淘汰约束更紧是正常的，R<1.0 预期)",
+            "hard3_criterion": "0.5 <= R <= 2.0 (预注册，不可修改)",
         }
         (OUTPUT_DIR / "audit_double_elim_check.json").write_text(json.dumps(double_elim_check, indent=2), encoding="utf-8")
         log(f"Hard-3 Check: R={R_double_single:.4f}, pass={hard3_check_pass}" if not np.isnan(R_double_single) else "Hard-3 Check: insufficient data")
