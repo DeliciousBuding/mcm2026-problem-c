@@ -269,6 +269,68 @@ def strict_feasible_mask(
     return simplex_ok & elim_ok, sums, elim_resid
 
 
+# =========================
+# 规则一致性诊断（与采样解耦）
+# =========================
+
+def compute_rule_diagnostics(week_df: pd.DataFrame, eps_ord: float = EPS_ORD) -> Dict[str, float]:
+    """
+    计算 percent/rank 规则一致性诊断（仅依赖原始数据，与采样完全解耦）。
+    
+    定义：
+    - percent_rule_residual = max(judge_share_E) - min(judge_share_S)
+    - percent_rule_diagnostic = 1 if percent_rule_residual <= eps_ord else 0
+    - rank_rule_residual = max(judge_rank_E) - min(judge_rank_S)  [rank: 1=best, N=worst]
+    - rank_rule_diagnostic = 1 if rank_rule_residual <= eps_ord else 0
+    
+    注：这些诊断仅用于报告"题面规则是否在原始数据下被满足"，不影响 strict feasible 判定。
+    """
+    active_df = week_df[week_df["active"]].copy()
+    n = len(active_df)
+    
+    # 默认返回（无有效数据）
+    default = {
+        "percent_rule_residual": float("nan"),
+        "percent_rule_diagnostic": 0,
+        "rank_rule_residual": float("nan"),
+        "rank_rule_diagnostic": 0,
+    }
+    
+    if n == 0:
+        return default
+    
+    elim_mask = active_df["is_eliminated_week"].to_numpy().astype(bool)
+    if not elim_mask.any() or elim_mask.all():
+        # 无淘汰者或全部被淘汰（边界情况）
+        return default
+    
+    # ========== Percent Rule: 基于 judge_share ==========
+    # 淘汰者的 judge_share 应为最低（允许 ties）
+    judge_share = active_df["judge_share"].to_numpy()
+    max_e_share = float(np.max(judge_share[elim_mask]))
+    min_s_share = float(np.min(judge_share[~elim_mask]))
+    percent_residual = max_e_share - min_s_share
+    percent_diagnostic = 1 if percent_residual <= eps_ord else 0
+    
+    # ========== Rank Rule: 基于 judge_rank (ascending=True, 低分=低排名=差) ==========
+    # rank: 1=最高分, N=最低分；淘汰者的 rank 应接近 N（即 rank 值最大）
+    # 我们检查：淘汰者的 rank 是否在 bottom-k（即 rank 最大的 k 个）
+    judge_rank = active_df["judge_share"].rank(ascending=True, method="average").to_numpy()
+    # rank ascending=True: 最低 share → rank=1, 最高 share → rank=N
+    # 淘汰者应该是 rank 最小的（share 最低）
+    max_e_rank = float(np.max(judge_rank[elim_mask]))  # 淘汰者中最高的 rank（应接近淘汰阈值）
+    min_s_rank = float(np.min(judge_rank[~elim_mask]))  # 存活者中最低的 rank
+    rank_residual = max_e_rank - min_s_rank
+    rank_diagnostic = 1 if rank_residual <= eps_ord else 0
+    
+    return {
+        "percent_rule_residual": percent_residual,
+        "percent_rule_diagnostic": percent_diagnostic,
+        "rank_rule_residual": rank_residual,
+        "rank_rule_diagnostic": rank_diagnostic,
+    }
+
+
 def sample_week_percent(
     week_df: pd.DataFrame,
     alpha: float,
@@ -355,12 +417,8 @@ def sample_week_percent(
         "accept_rate_strict": float(n_accept_strict) / float(n_props) if n_props > 0 else 0.0,
         "min_violation": min_violation,
         "max_violation": max_violation,
-        # ========== Hard-0 诊断：percent/rank rule 不进入可行性判定，但必须输出 ==========
-        # percent_rule_diagnostic: 在 strict feasible 样本中，淘汰者是否为 combined score 最低
-        # rank_rule_diagnostic: 预留字段（rank rule 使用不同采样函数）
-        # 这些字段仅用于报告/诊断，不影响 strict feasible 判定
-        "percent_rule_diagnostic": 1 if (len(elim_idx) > 0 and n_accept_strict > 0) else 0,  # 有淘汰者且有有效样本则可诊断
-        "rank_rule_diagnostic": 0,  # percent rule 采样器不输出 rank 诊断（rank 使用单独函数）
+        # ========== 注意：percent/rank 诊断已移至 compute_rule_diagnostics() ==========
+        # 诊断字段由 process_season_samples 从独立函数获取（与采样解耦）
         "strict_feasible_flag": strict_feasible_flag,
         "used_fallback": used_fallback,
         "excluded_from_metrics": excluded_from_metrics,
@@ -975,6 +1033,9 @@ def process_season_samples(
         if len(active_df) == 0:
             continue
 
+        # ========== 规则一致性诊断（与采样解耦）==========
+        rule_diag = compute_rule_diagnostics(wdf, EPS_ORD)
+
         samples, acc_rate, meta = sample_week_percent(wdf, alpha, epsilon, n_props, rng)
         _, slack = lp_bounds_and_slack(wdf, alpha, epsilon, compute_bounds)
 
@@ -1005,8 +1066,11 @@ def process_season_samples(
                 "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
                 "min_violation": float(meta.get("min_violation", float("nan"))),
                 "max_violation": float(meta.get("max_violation", float("nan"))),
-                "percent_rule_diagnostic": int(meta.get("percent_rule_diagnostic", 0)),
-                "rank_rule_diagnostic": int(meta.get("rank_rule_diagnostic", 0)),
+                # ========== 规则诊断：底层残差 + 判定（与采样解耦）==========
+                "percent_rule_residual": float(rule_diag["percent_rule_residual"]),
+                "percent_rule_diagnostic": int(rule_diag["percent_rule_diagnostic"]),
+                "rank_rule_residual": float(rule_diag["rank_rule_residual"]),
+                "rank_rule_diagnostic": int(rule_diag["rank_rule_diagnostic"]),
                 "strict_feasible_flag": 0,
                 "used_fallback": 1,
                 "excluded_from_metrics": 1,
@@ -1052,8 +1116,11 @@ def process_season_samples(
             "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
             "min_violation": float(meta.get("min_violation", float("nan"))),
             "max_violation": float(meta.get("max_violation", float("nan"))),
-            "percent_rule_diagnostic": int(meta.get("percent_rule_diagnostic", 0)),
-            "rank_rule_diagnostic": int(meta.get("rank_rule_diagnostic", 0)),
+            # ========== 规则诊断：底层残差 + 判定（与采样解耦）==========
+            "percent_rule_residual": float(rule_diag["percent_rule_residual"]),
+            "percent_rule_diagnostic": int(rule_diag["percent_rule_diagnostic"]),
+            "rank_rule_residual": float(rule_diag["rank_rule_residual"]),
+            "rank_rule_diagnostic": int(rule_diag["rank_rule_diagnostic"]),
             "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
             "used_fallback": int(meta.get("used_fallback", 0)),
             "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
@@ -1196,6 +1263,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             if len(active_df) == 0:
                 continue
 
+            # ========== 规则一致性诊断（与采样解耦）==========
+            rule_diag = compute_rule_diagnostics(wdf, EPS_ORD)
+
             key = (int(season), int(week))
             if key in samples_cache:
                 samples = samples_cache[key]
@@ -1229,8 +1299,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                     "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
                     "min_violation": float(meta.get("min_violation", float("nan"))),
                     "max_violation": float(meta.get("max_violation", float("nan"))),
-                    "percent_rule_diagnostic": int(meta.get("percent_rule_diagnostic", 0)),
-                    "rank_rule_diagnostic": int(meta.get("rank_rule_diagnostic", 0)),
+                    # ========== 规则诊断：底层残差 + 判定（与采样解耦）==========
+                    "percent_rule_residual": float(rule_diag["percent_rule_residual"]),
+                    "percent_rule_diagnostic": int(rule_diag["percent_rule_diagnostic"]),
+                    "rank_rule_residual": float(rule_diag["rank_rule_residual"]),
+                    "rank_rule_diagnostic": int(rule_diag["rank_rule_diagnostic"]),
                     "strict_feasible_flag": 0,
                     "used_fallback": 1,
                     "excluded_from_metrics": 1,
@@ -1280,8 +1353,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 "accept_rate_strict": float(meta.get("accept_rate_strict", 0.0)),
                 "min_violation": float(meta.get("min_violation", float("nan"))),
                 "max_violation": float(meta.get("max_violation", float("nan"))),
-                "percent_rule_diagnostic": int(meta.get("percent_rule_diagnostic", 0)),
-                "rank_rule_diagnostic": int(meta.get("rank_rule_diagnostic", 0)),
+                # ========== 规则诊断：底层残差 + 判定（与采样解耦）==========
+                "percent_rule_residual": float(rule_diag["percent_rule_residual"]),
+                "percent_rule_diagnostic": int(rule_diag["percent_rule_diagnostic"]),
+                "rank_rule_residual": float(rule_diag["rank_rule_residual"]),
+                "rank_rule_diagnostic": int(rule_diag["rank_rule_diagnostic"]),
                 "strict_feasible_flag": int(meta.get("strict_feasible_flag", 0)),
                 "used_fallback": int(meta.get("used_fallback", 0)),
                 "excluded_from_metrics": int(meta.get("excluded_from_metrics", 0)),
@@ -1340,10 +1416,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         #   - feasible_flag: True 表示采样阶段找到至少 1 个 strict feasible 样本
         #   - fallback_flag: 等同于 used_fallback（历史兼容）
         #   - accept_rate, n_accept: fast check 的接受率与数量（诊断用）
-        #   - violation_proxy, audit_weak, confidence_tag: 诊断/可视化用
         # Hard-0 诊断字段（不进入可行性判定，仅输出）：
-        #   - percent_rule_diagnostic: percent rule 可诊断标记（有淘汰者且有有效样本）
-        #   - rank_rule_diagnostic: rank rule 诊断标记（percent 采样器固定为 0）
+        #   - percent_rule_residual/diagnostic: 基于原始数据的底层残差 + 判定（与采样解耦）
+        #   - rank_rule_residual/diagnostic: 基于原始数据的底层残差 + 判定（与采样解耦）
         audit_cols = [
             "season",
             "week",
@@ -1356,7 +1431,9 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "accept_rate_strict",
             "min_violation",
             "max_violation",
+            "percent_rule_residual",
             "percent_rule_diagnostic",
+            "rank_rule_residual",
             "rank_rule_diagnostic",
             "feasible_flag",
             "fallback_flag",
