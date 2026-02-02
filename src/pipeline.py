@@ -374,20 +374,21 @@ def evaluate_mechanisms(
     a_idx = bottom_two[:, 0]
     b_idx = bottom_two[:, 1]
     diff = j_scores[b_idx] - j_scores[a_idx]
-    p_elim_a = 1 / (1 + np.exp(JUDGESAVE_BETA * diff))
+    p_elim_a = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff))
     rand_u = rng.random(m)
     elim_s = np.where(rand_u < p_elim_a, a_idx, b_idx)
 
     conflict_mask = elim_p != elim_r
+    conflict_mask_eval = conflict_mask if daws_tier != "Red" else np.zeros_like(conflict_mask, dtype=bool)
+    c1 = elim_p[conflict_mask_eval] if np.any(conflict_mask_eval) else np.array([], dtype=int)
+    c2 = elim_r[conflict_mask_eval] if np.any(conflict_mask_eval) else np.array([], dtype=int)
     if daws_tier == "Red":
         elim_d = np.argmin(samples, axis=1)
     else:
         elim_d = elim_p.copy()
         if np.any(conflict_mask):
-            c1 = elim_p[conflict_mask]
-            c2 = elim_r[conflict_mask]
             diff_c = j_scores[c2] - j_scores[c1]
-            p_elim_c1 = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_c))
+            p_elim_c1 = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_c))
             rand_c = rng.random(np.sum(conflict_mask))
             elim_d[conflict_mask] = np.where(rand_c < p_elim_c1, c1, c2)
 
@@ -441,7 +442,7 @@ def evaluate_mechanisms(
     a_n = bottom_two_noise[:, 0]
     b_n = bottom_two_noise[:, 1]
     diff_n = j_scores[b_n] - j_scores[a_n]
-    p_elim_a_n = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_n))
+    p_elim_a_n = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_n))
     rand_u_n = rng.random(m)
     elim_noise_s = np.where(rand_u_n < p_elim_a_n, a_n, b_n)
 
@@ -454,7 +455,7 @@ def evaluate_mechanisms(
             c1_n = elim_noise_p[conflict_noise]
             c2_n = elim_noise_r[conflict_noise]
             diff_cn = j_scores[c2_n] - j_scores[c1_n]
-            p_elim_c1n = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_cn))
+            p_elim_c1n = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_cn))
             rand_cn = rng.random(np.sum(conflict_noise))
             elim_noise_d[conflict_noise] = np.where(rand_cn < p_elim_c1n, c1_n, c2_n)
 
@@ -463,11 +464,39 @@ def evaluate_mechanisms(
     instability_s = np.mean(elim_s != elim_noise_s)
     instability_d = np.mean(elim_d != elim_noise_d)
 
+    conflict_count = int(np.sum(conflict_mask_eval))
+    if conflict_count > 0:
+        elim_p_c = elim_p[conflict_mask_eval]
+        elim_r_c = elim_r[conflict_mask_eval]
+        elim_d_c = elim_d[conflict_mask_eval]
+        # Conflict-week agency: alignment with percent outcome (viewer rule)
+        agency_p_c = 1.0
+        agency_r_c = np.mean(elim_r_c == elim_p_c)
+        agency_d_c = np.mean(elim_d_c == elim_p_c)
+        other_p = c2
+        other_r = c1
+        other_d = np.where(elim_d_c == c1, c2, c1)
+        integrity_p_c = np.mean(j_scores[other_p] >= j_scores[elim_p_c])
+        integrity_r_c = np.mean(j_scores[other_r] >= j_scores[elim_r_c])
+        integrity_d_c = np.mean(j_scores[other_d] >= j_scores[elim_d_c])
+
+        instability_p_c = np.mean(elim_p[conflict_mask] != elim_noise_p[conflict_mask])
+        instability_r_c = np.mean(elim_r[conflict_mask] != elim_noise_r[conflict_mask])
+        instability_d_c = np.mean(elim_d[conflict_mask] != elim_noise_d[conflict_mask])
+    else:
+        agency_p_c = agency_r_c = agency_d_c = 0.0
+        integrity_p_c = integrity_r_c = integrity_d_c = 0.0
+        instability_p_c = instability_r_c = instability_d_c = 0.0
+
     return {
         "percent": {"fairness": tau_mean, "agency": agency_p, "instability": instability_p, "judge_integrity": integrity_p},
         "rank": {"fairness": tau_mean, "agency": agency_r, "instability": instability_r, "judge_integrity": integrity_r},
         "save": {"fairness": tau_mean, "agency": agency_s, "instability": instability_s, "judge_integrity": integrity_s},
         "daws": {"fairness": tau_mean, "agency": agency_d, "instability": instability_d, "judge_integrity": integrity_d},
+        "percent_conflict": {"agency": agency_p_c, "instability": instability_p_c, "judge_integrity": integrity_p_c},
+        "rank_conflict": {"agency": agency_r_c, "instability": instability_r_c, "judge_integrity": integrity_r_c},
+        "daws_conflict": {"agency": agency_d_c, "instability": instability_d_c, "judge_integrity": integrity_d_c},
+        "conflict_count": conflict_count,
         "flip_sum": float(np.sum(conflict_mask)),
         "count": m,
     }
@@ -726,7 +755,7 @@ def synthetic_data_validation(
 
 def render_dashboard_concept() -> None:
     """绘制制片人仪表盘概念图（用于论文展示）。"""
-    fig, ax = plt.subplots(figsize=(7.2, 4.2))
+    fig, ax = plt.subplots(figsize=(8.2, 4.6))
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
@@ -742,7 +771,7 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(panel)
-    ax.text(0.05, 0.92, "Producer Dashboard", fontsize=12, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.05, 0.92, "Producer Dashboard", fontsize=13, fontweight="bold", color=COLOR_PRIMARY_DARK)
 
     # 状态区
     status_box = FancyBboxPatch(
@@ -755,17 +784,19 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(status_box)
-    ax.text(0.07, 0.79, "Signal V", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
-    ax.text(0.07, 0.74, "Monitoring Only (No Override)", fontsize=7, color=COLOR_GRAY)
+    ax.text(0.07, 0.79, "Signal V", fontsize=10, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.07, 0.74, "Monitoring Only (No Override)", fontsize=8, color=COLOR_GRAY)
     lights = [("Green", "#7FBF7B"), ("Yellow", "#F1C232"), ("Red", COLOR_WARNING)]
     y_pos = [0.67, 0.55, 0.43]
     for (label, color), y in zip(lights, y_pos):
         active = (label == "Yellow")
         face = color if active else "#DDDDDD"
-        circle = Circle((0.11, y), 0.035, facecolor=face, edgecolor="#666666", linewidth=1.0)
+        circle = Circle((0.11, y), 0.038, facecolor=face, edgecolor="#666666", linewidth=1.0)
         ax.add_patch(circle)
-    ax.text(0.19, 0.55, "Audit Level: Yellow", fontsize=9, color=COLOR_WARNING, fontweight="bold")
-    ax.text(0.08, 0.28, "Disclosure: Warning", fontsize=8, color=COLOR_GRAY)
+        ax.text(0.16, y, label, fontsize=8, color=COLOR_GRAY, va="center")
+    ax.text(0.19, 0.55, "Audit Level: Yellow", fontsize=10, color=COLOR_WARNING, fontweight="bold")
+    ax.text(0.08, 0.30, "Disclosure: Warning", fontsize=8.5, color=COLOR_GRAY)
+    ax.text(0.08, 0.24, "Confidence: Medium", fontsize=8.5, color=COLOR_GRAY)
 
     # 审计区
     audit_box = FancyBboxPatch(
@@ -778,7 +809,7 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(audit_box)
-    ax.text(0.35, 0.79, "Audit Window (HDI)", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.35, 0.79, "Audit Window (HDI)", fontsize=10, fontweight="bold", color=COLOR_PRIMARY_DARK)
     for i in range(5):
         y = 0.69 - i * 0.11
         ax.add_line(plt.Line2D([0.36, 0.68], [y, y], color="#CCCCCC", linewidth=3))
@@ -787,7 +818,7 @@ def render_dashboard_concept() -> None:
         ax.add_patch(Rectangle((band_x, y - 0.015), band_w, 0.03, facecolor=COLOR_PRIMARY, alpha=0.35, edgecolor="none"))
         if i == 1:
             ax.add_patch(Rectangle((band_x, y - 0.018), band_w, 0.036, facecolor="none", edgecolor=COLOR_WARNING, linewidth=1.1))
-            ax.text(0.56, y + 0.025, "High Risk", fontsize=7, color=COLOR_WARNING)
+            ax.text(0.56, y + 0.027, "High Risk", fontsize=8, color=COLOR_WARNING)
 
     # 建议区
     rec_box = FancyBboxPatch(
@@ -800,8 +831,8 @@ def render_dashboard_concept() -> None:
         linewidth=1.0,
     )
     ax.add_patch(rec_box)
-    ax.text(0.75, 0.79, "Signal A", fontsize=9, fontweight="bold", color=COLOR_PRIMARY_DARK)
-    ax.text(0.75, 0.74, "Action Trigger", fontsize=7, color=COLOR_GRAY)
+    ax.text(0.75, 0.79, "Signal A", fontsize=10, fontweight="bold", color=COLOR_PRIMARY_DARK)
+    ax.text(0.75, 0.74, "Action Trigger", fontsize=8, color=COLOR_GRAY)
     rec_callout = FancyBboxPatch(
         (0.75, 0.50),
         0.18,
@@ -813,8 +844,8 @@ def render_dashboard_concept() -> None:
     )
     ax.add_patch(rec_callout)
     ax.text(0.84, 0.59, "Protocol\nStatus:\nJUDGE SAVE", ha="center", va="center",
-            fontsize=8, fontweight="bold", color=COLOR_WARNING)
-    ax.text(0.75, 0.32, "Triggered by Conflict (A=1)", fontsize=7.5, color=COLOR_WARNING)
+            fontsize=9, fontweight="bold", color=COLOR_WARNING)
+    ax.text(0.75, 0.32, "Triggered by Conflict (A=1)", fontsize=8, color=COLOR_WARNING)
 
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_dashboard_concept.pdf")
@@ -949,7 +980,7 @@ def mechanism_judge_save(v: np.ndarray, week_df: pd.DataFrame, beta: float) -> L
     a, b = bottom_two
     j_scores = active_df["judge_total"].to_numpy()
     diff = j_scores[b] - j_scores[a]
-    p_elim_a = 1 / (1 + math.exp(beta * diff))
+    p_elim_a = 1 / (1 + math.exp(-beta * diff))
     return [int(a if RNG.random() < p_elim_a else b)]
 
 
@@ -1286,6 +1317,11 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         "save": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
         "daws": {"fairness_sum": 0.0, "agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
     }
+    metrics_conflict = {
+        "percent": {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+        "rank": {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+        "daws": {"agency_sum": 0.0, "instability_sum": 0.0, "judge_integrity_sum": 0.0, "count": 0},
+    }
     flip_sum = 0.0
     flip_count = 0
 
@@ -1325,6 +1361,15 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             metrics[key]["judge_integrity_sum"] += eval_res[key]["judge_integrity"] * m
             metrics[key]["count"] += m
 
+        conflict_count = eval_res.get("conflict_count", 0)
+        if conflict_count:
+            for key in ["percent", "rank", "daws"]:
+                c_key = f"{key}_conflict"
+                metrics_conflict[key]["agency_sum"] += eval_res[c_key]["agency"] * conflict_count
+                metrics_conflict[key]["instability_sum"] += eval_res[c_key]["instability"] * conflict_count
+                metrics_conflict[key]["judge_integrity_sum"] += eval_res[c_key]["judge_integrity"] * conflict_count
+                metrics_conflict[key]["count"] += conflict_count
+
         # 收集季节级指标
         season_metrics_list.append({
             "season": int(season),
@@ -1357,9 +1402,24 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             "judge_integrity": float(judge_integrity),
         }
 
+    def agg_conflict(d: Dict[str, float]) -> Dict[str, float]:
+        if d["count"] == 0:
+            return {"agency": float("nan"), "stability": float("nan"), "judge_integrity": float("nan")}
+        agency = d["agency_sum"] / d["count"]
+        stability = 1.0 - (d["instability_sum"] / d["count"])
+        judge_integrity = d["judge_integrity_sum"] / d["count"]
+        return {
+            "agency": float(agency),
+            "stability": float(stability),
+            "judge_integrity": float(judge_integrity),
+        }
+
     stats_percent = agg_stats(metrics["percent"])
     stats_rank = agg_stats(metrics["rank"])
     stats_daws = agg_stats(metrics["daws"])
+    stats_percent_conf = agg_conflict(metrics_conflict["percent"])
+    stats_rank_conf = agg_conflict(metrics_conflict["rank"])
+    stats_daws_conf = agg_conflict(metrics_conflict["daws"])
     flip_rate = float(flip_sum / flip_count) if flip_count else float("nan")
     log(f"Flip rate (percent vs rank): {flip_rate:.3f}")
 
@@ -1609,16 +1669,21 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     log("Rendering figures...")
 
     # Uncertainty heatmap
-    plt.figure(figsize=(6.4, 3.8))
+    plt.figure(figsize=(6.6, 4.4))
+    cmap_uncertainty = sns.light_palette("#6BAED6", as_cmap=True)
     ax = sns.heatmap(
         heat,
-        cmap="cividis",
+        cmap=cmap_uncertainty,
         cbar_kws={"label": "Mean HDI width"},
+        mask=np.isnan(heat),
     )
     ax.set_xticks(np.arange(max_week) + 0.5)
     ax.set_xticklabels(np.arange(1, max_week + 1))
-    ax.set_yticks(np.arange(max_season) + 0.5)
-    ax.set_yticklabels(np.arange(1, max_season + 1))
+    season_idx = np.arange(max_season)
+    y_step = 2 if max_season > 20 else 1
+    y_ticks = season_idx[::y_step]
+    ax.set_yticks(y_ticks + 0.5)
+    ax.set_yticklabels(y_ticks + 1, fontsize=7)
     plt.xlabel("Week")
     plt.ylabel("Season")
     plt.title("Uncertainty concentrates in a small set of weeks\n(blank cells = no elimination or missing data)")
@@ -1627,26 +1692,27 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.close()
 
     # Wrongful heatmap
-    plt.figure(figsize=(6.4, 3.8))
+    plt.figure(figsize=(6.6, 4.4))
+    cmap_wrongful = sns.light_palette("#6BAED6", as_cmap=True)
     ax = sns.heatmap(
         wrongful_heat,
-        cmap="cividis",
+        cmap=cmap_wrongful,
         cbar_kws={"label": "Wrongful prob"},
+        vmin=0.0,
+        vmax=1.0,
+        mask=np.isnan(wrongful_heat),
     )
     ax.set_xticks(np.arange(max_week) + 0.5)
     ax.set_xticklabels(np.arange(1, max_week + 1))
-    ax.set_yticks(np.arange(max_season) + 0.5)
-    ax.set_yticklabels(np.arange(1, max_season + 1))
+    season_idx = np.arange(max_season)
+    y_step = 2 if max_season > 20 else 1
+    y_ticks = season_idx[::y_step]
+    ax.set_yticks(y_ticks + 0.5)
+    ax.set_yticklabels(y_ticks + 1, fontsize=7)
     plt.xlabel("Week")
     plt.ylabel("Season")
     plt.title("Wrongful elimination probability by week\n(blank cells = no elimination or missing data)")
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig_wrongful_heatmap.pdf")
-    plt.close()
-    ax.set_yticklabels(np.arange(1, max_season + 1))
-    plt.xlabel("Week")
-    plt.ylabel("Season")
-    plt.title("Wrongful elimination probability by week")
     plt.savefig(FIG_DIR / "fig_wrongful_heatmap.pdf")
     plt.close()
 
@@ -1786,9 +1852,16 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     render_dashboard_concept()
 
     # Mechanism radar
-    def radar_plot(stats_dict: Dict[str, Dict[str, float]], labels: List[str], fname: str) -> None:
+    def radar_plot(
+        stats_dict: Dict[str, Dict[str, float]],
+        labels: List[str],
+        fname: str,
+        title: str,
+        tick_labels: List[str] | None = None,
+    ) -> None:
         categories = ["agency", "judge_integrity", "stability"]
-        tick_labels = ["Agency", "Integrity", "Stability"]
+        if tick_labels is None:
+            tick_labels = ["Agency", "Integrity", "Stability"]
         angles = np.linspace(0, 2 * math.pi, len(categories), endpoint=False).tolist()
         angles += angles[:1]
         fig = plt.figure(figsize=(4.8, 4.2))
@@ -1799,7 +1872,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             ax.plot(angles, values, label=label)
             ax.fill(angles, values, alpha=0.10)
         ax.set_thetagrids(np.degrees(angles[:-1]), tick_labels)
-        ax.set_title("Mechanism trade-offs")
+        ax.set_title(title)
         ax.legend(loc="upper right", bbox_to_anchor=(1.15, 1.05))
         fig.savefig(FIG_DIR / fname)
         plt.close(fig)
@@ -1808,6 +1881,15 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         {"Percent": stats_percent, "Rank": stats_rank, "DAWS": stats_daws},
         ["Percent", "Rank", "DAWS"],
         "fig_mechanism_radar.pdf",
+        "Mechanism trade-offs",
+    )
+
+    radar_plot(
+        {"Percent": stats_percent_conf, "Rank": stats_rank_conf, "DAWS": stats_daws_conf},
+        ["Percent", "Rank", "DAWS"],
+        "fig_mechanism_radar_conflict.pdf",
+        "Mechanism trade-offs (conflict weeks)",
+        tick_labels=["Agency (Pct align)", "Integrity", "Stability"],
     )
 
     # Mechanism compare (bar)
@@ -1828,6 +1910,26 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     plt.legend(frameon=False, fontsize=8)
     plt.tight_layout()
     plt.savefig(FIG_DIR / "fig_mechanism_compare.pdf")
+    plt.close()
+
+    # Mechanism compare (bar) - conflict weeks only
+    labels = ["Agency (pct align)", "Integrity", "Stability"]
+    percent_vals = [stats_percent_conf["agency"], stats_percent_conf["judge_integrity"], stats_percent_conf["stability"]]
+    rank_vals = [stats_rank_conf["agency"], stats_rank_conf["judge_integrity"], stats_rank_conf["stability"]]
+    daws_vals = [stats_daws_conf["agency"], stats_daws_conf["judge_integrity"], stats_daws_conf["stability"]]
+    x = np.arange(len(labels))
+    width = 0.24
+    plt.figure(figsize=(6.2, 3.6))
+    plt.bar(x - width, percent_vals, width, label="Percent", color=COLOR_PRIMARY, alpha=0.85)
+    plt.bar(x, rank_vals, width, label="Rank", color=COLOR_GRAY, alpha=0.85)
+    plt.bar(x + width, daws_vals, width, label="DAWS", color=COLOR_ACCENT, alpha=0.85)
+    plt.xticks(x, labels, fontsize=9)
+    plt.ylim(0, 1)
+    plt.ylabel("Score")
+    plt.title("Mechanism comparison (conflict weeks)")
+    plt.legend(frameon=False, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "fig_mechanism_compare_conflict.pdf")
     plt.close()
 
     # Pareto-like trade-off (2D)
@@ -1913,20 +2015,35 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
     common_idx = fe_j_series.index.intersection(fe_f_series.index)
     x = fe_j_series[common_idx]
     y = fe_f_series[common_idx]
-    plt.figure(figsize=(5.0, 4.0))
+    plt.figure(figsize=(5.4, 4.2))
     plt.scatter(x, y, color=COLOR_PRIMARY)
     lim = max(abs(x).max(), abs(y).max())
     plt.plot([-lim, lim], [-lim, lim], color=COLOR_GRAY, linestyle="--")
     # annotate most divergent features
     dist = (y - x).abs()
     top_idx = dist.sort_values(ascending=False).head(5).index
+    label_offsets = {
+        "C(celebrity_industry)[T.Fitness Instructor]": (6, 8),
+        "C(celebrity_industry)[T.Politician]": (6, -8),
+    }
     for idx in top_idx:
+        raw_label = str(idx)
         label = (
-            str(idx)
+            raw_label
             .replace("celebrity_industry_", "ind:")
             .replace("ballroom_partner_", "pro:")
         )
-        plt.annotate(label, (x[idx], y[idx]), fontsize=7, alpha=0.8)
+        dx, dy = label_offsets.get(raw_label, (4, 4))
+        plt.annotate(
+            label,
+            (x[idx], y[idx]),
+            xytext=(dx, dy),
+            textcoords="offset points",
+            fontsize=7,
+            alpha=0.85,
+            ha="left",
+            va="center",
+        )
     plt.xlabel("Judge effect")
     plt.ylabel("Fan effect")
     plt.title("Feature impacts: judges vs fans")
@@ -1946,7 +2063,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # Judge-save curve (示意)
     xs = np.linspace(-10, 10, 200)
-    ys = 1 / (1 + np.exp(JUDGESAVE_BETA * xs))
+    ys = 1 / (1 + np.exp(-JUDGESAVE_BETA * xs))
     plt.figure(figsize=(5.0, 3.4))
     plt.plot(xs, ys, color=COLOR_PRIMARY)
     plt.xlabel("Judge score difference")
@@ -1997,7 +2114,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
             p_idx = elim_p[conflict_mask]
             r_idx = elim_r[conflict_mask]
             diff = j_scores[r_idx] - j_scores[p_idx]
-            p_elim_p = 1 / (1 + np.exp(beta * diff))
+            p_elim_p = 1 / (1 + np.exp(-beta * diff))
             j_p = j_scores[p_idx]
             j_r = j_scores[r_idx]
             higher_is_p = j_p >= j_r
@@ -2022,7 +2139,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.4))
         diff_grid = np.linspace(-3, 3, 240)
         for beta in betas:
-            axes[0].plot(diff_grid, 1 / (1 + np.exp(beta * diff_grid)), label=f"β={beta:.0f}")
+            axes[0].plot(diff_grid, 1 / (1 + np.exp(-beta * diff_grid)), label=f"β={beta:.0f}")
         axes[0].set_xlabel("Judge score diff (r − p)")
         axes[0].set_ylabel("P(eliminate percent candidate)")
         axes[0].set_title("Decision sensitivity (logit)")
@@ -2139,7 +2256,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         a_idx = bottom_two[:, 0]
         b_idx = bottom_two[:, 1]
         diff = j_scores[b_idx] - j_scores[a_idx]
-        p_elim_a = 1 / (1 + np.exp(JUDGESAVE_BETA * diff))
+        p_elim_a = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff))
         prob_s = np.zeros(n)
         for i in range(n):
             mask_a = (a_idx == i)
@@ -2164,7 +2281,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                 c1 = elim_p[conflict_mask]
                 c2 = elim_r[conflict_mask]
                 diff_c = j_scores[c2] - j_scores[c1]
-                p_elim_c1 = 1 / (1 + np.exp(JUDGESAVE_BETA * diff_c))
+                p_elim_c1 = 1 / (1 + np.exp(-JUDGESAVE_BETA * diff_c))
                 np.add.at(prob_d, c1, p_elim_c1)
                 np.add.at(prob_d, c2, 1 - p_elim_c1)
             prob_d = prob_d / m
@@ -2337,7 +2454,7 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
                         elim_pred = elim_p
                     else:
                         diff = j_scores[elim_r] - j_scores[elim_p]
-                        p_elim_p = 1 / (1 + math.exp(JUDGESAVE_BETA * diff))
+                        p_elim_p = 1 / (1 + math.exp(-JUDGESAVE_BETA * diff))
                         elim_pred = elim_p if p_elim_p >= 0.5 else elim_r
             if elim_pred not in elim_idx:
                 elim_mismatch += 1
