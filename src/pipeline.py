@@ -45,8 +45,12 @@ EPSILON = 0.001  # 投票占比下限
 EPS_SUM = 1e-9  # strict feasible: |sum(v) - 1| <= eps_sum
 EPS_ORD = 1e-6  # strict feasible: inequality tolerance (ordering)
 ALPHA_PERCENT = 0.5  # 百分比规则权重
-N_PROPOSALS = int(os.getenv("MCM_N_PROPOSALS", "250"))  # 每周Dirichlet提案数量
-MIN_ACCEPT = 40  # 最少保留的可行样本
+# ========== Hard-1/6 收敛：默认 n_proposals 必须足够大 ==========
+# 根据 median_accept_rate_strict ≈ 0.13，N_STRICT_MIN=500 需要 n_proposals >= 3900
+# 但实际测试显示 4000 仍有 47% 排除；8000 时降到 7.5%
+# 写死默认值为 8000，确保排除比例 < 20%
+N_PROPOSALS = int(os.getenv("MCM_N_PROPOSALS", "8000"))  # 每周Dirichlet提案数量（写死 >= 8000）
+MIN_ACCEPT = 40  # 最少保留的可行样本（仅用于 fast check 诊断，不影响 strict）
 N_STRICT_MIN = 500  # strict feasible 最小样本阈值（写死）
 SIGMA_LIST = [0.5, 1.0, 1.5, 2.0]
 RHO_SWITCH = 0.10  # 规则切换先验概率
@@ -1306,6 +1310,22 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
 
     # DAWS 档位输出（供 Dashboard 使用）
     if save_outputs and not week_metrics_df.empty:
+        # ========== Hard-1/6 字段口径说明 ==========
+        # 核心字段（用于验收）：
+        #   - seed, n_proposals: 采样配置
+        #   - n_accept_fast: 通过 fast check (simplex-only) 的样本数
+        #   - n_accept_strict: 通过 strict check (simplex+elimination) 的样本数
+        #   - accept_rate_strict: n_accept_strict / n_proposals
+        #   - min_violation, max_violation: 约束违反度范围
+        #   - strict_feasible_flag: 1 当且仅当 n_accept_strict >= N_STRICT_MIN
+        #   - used_fallback: 1 表示采样不足（n_accept_strict < N_STRICT_MIN）
+        #   - excluded_from_metrics: 1 表示该周不参与后验/HDI/机制指标计算
+        #   - valid_week: 1 表示该周可用于指标，等于 1 - excluded_from_metrics
+        # 兼容字段（诊断用，不影响 valid_week）：
+        #   - feasible_flag: True 表示采样阶段找到至少 1 个 strict feasible 样本
+        #   - fallback_flag: 等同于 used_fallback（历史兼容）
+        #   - accept_rate, n_accept: fast check 的接受率与数量（诊断用）
+        #   - violation_proxy, audit_weak, confidence_tag: 诊断/可视化用
         audit_cols = [
             "season",
             "week",
@@ -1330,6 +1350,29 @@ def run_pipeline(n_props: int | None = None, record_benchmark: bool = False, sav
         ]
         audit_meta_df = week_metrics_df.loc[:, [c for c in audit_cols if c in week_metrics_df.columns]].copy()
         audit_meta_df.to_csv(OUTPUT_DIR / "audit_week_meta.csv", index=False, encoding="utf-8", float_format="%.8f")
+
+        # ========== Hard-1/6 Gate 检查：输出排除比例与推荐采样量 ==========
+        total_weeks = len(audit_meta_df)
+        excluded_weeks = int(audit_meta_df["excluded_from_metrics"].sum()) if "excluded_from_metrics" in audit_meta_df else 0
+        excluded_ratio = excluded_weeks / total_weeks if total_weeks > 0 else 0.0
+        median_accept_strict = float(audit_meta_df["accept_rate_strict"].median()) if "accept_rate_strict" in audit_meta_df else 0.0
+        recommended_n_props = int(np.ceil(N_STRICT_MIN / median_accept_strict)) if median_accept_strict > 0 else 10000
+        gate_triggered = excluded_ratio >= 0.20
+
+        gate_info = {
+            "total_weeks": total_weeks,
+            "excluded_weeks": excluded_weeks,
+            "excluded_from_metrics_ratio": round(excluded_ratio, 4),
+            "median_accept_rate_strict": round(median_accept_strict, 6),
+            "recommended_n_proposals": recommended_n_props,
+            "current_n_proposals": n_props,
+            "N_STRICT_MIN": N_STRICT_MIN,
+            "gate_triggered_20pct": gate_triggered,
+        }
+        (OUTPUT_DIR / "audit_block5_gate.json").write_text(json.dumps(gate_info, indent=2), encoding="utf-8")
+        log(f"Block5 Gate: excluded_ratio={excluded_ratio:.2%}, median_accept_strict={median_accept_strict:.4f}, recommended_n_props={recommended_n_props}")
+        if gate_triggered:
+            log("WARNING: excluded_ratio >= 20%, season-level conclusions should be marked as exploratory")
 
         tier_records = []
         for _, row in week_metrics_df.iterrows():
