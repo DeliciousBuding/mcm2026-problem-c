@@ -12,6 +12,9 @@ paper/*.toc
 paper/*.fls
 paper/*.fdb_latexmk
 paper/*.synctex.gz
+paper/*.bbl
+paper/*.blg
+paper/_preview_page*.png
 
 # Runtime logs
 outputs/run.log
@@ -19,6 +22,8 @@ outputs/run.log
 # Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
 
 # Jupyter
 .ipynb_checkpoints/
